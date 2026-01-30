@@ -1,0 +1,16 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+
+# SQLite
+*.db
+*.sqlite
+
+# Environment / secrets
+.env
+
+# PDFs outputs (optional, we can decide later)
+outputs/
