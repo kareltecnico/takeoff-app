@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from app.domain.item import Item
-from app.domain.stage import Stage
 from app.domain.money import LineTotals, calc_line_totals
+from app.domain.stage import Stage
 
 
 @dataclass(frozen=True)
