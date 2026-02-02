@@ -7,12 +7,13 @@ from app.domain.item import Item
 from app.domain.money import LineTotals, calc_line_totals
 from app.domain.stage import Stage
 
+__all__ = ["TakeoffLine"]
+
 
 @dataclass(frozen=True)
 class TakeoffLine:
-    """
-    One line inside a Take-Off (per stage).
-    """
+    """One line inside a Take-Off (per stage)."""
+
     item: Item
     stage: Stage
     qty: Decimal

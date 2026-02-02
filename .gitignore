@@ -14,3 +14,7 @@ __pycache__/
 
 # PDFs outputs (optional, we can decide later)
 outputs/
+
+# Packaging artifacts
+*.egg-info/
+app/*.egg-info/
