@@ -18,3 +18,7 @@ outputs/
 # Packaging artifacts
 *.egg-info/
 app/*.egg-info/
+
+# Local generated artifacts
+outputs/
+*.pdf

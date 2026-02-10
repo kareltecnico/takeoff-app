@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -11,9 +9,10 @@ from reportlab.lib.units import inch
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen.canvas import Canvas
 
-from app.domain.stage import Stage
-from app.domain.takeoff import Takeoff
-from app.domain.takeoff_line import TakeoffLine
+from app.reporting.models import ReportSection, TakeoffReport
+from app.reporting.renderers import TakeoffReportRenderer
+
+__all__ = ["PdfStyle", "ReportLabTakeoffPdfRenderer", "render_takeoff_pdf"]
 
 
 @dataclass(frozen=True)
@@ -31,6 +30,14 @@ class PdfStyle:
     line_height: float = 12
 
 
+@dataclass(frozen=True)
+class ReportLabTakeoffPdfRenderer(TakeoffReportRenderer):
+    style: PdfStyle | None = None
+
+    def render(self, report: TakeoffReport, output_path: Path) -> Path:
+        return render_takeoff_pdf(report, output_path, style=self.style)
+
+
 def _money(x: Decimal) -> str:
     return f"${x:.2f}"
 
@@ -39,9 +46,11 @@ def _fit_text(text: str, max_width: float, font: str, size: int) -> str:
     """Truncate with ellipsis so it fits in max_width."""
     if stringWidth(text, font, size) <= max_width:
         return text
+
     ell = "…"
     lo, hi = 0, len(text)
     best = ell
+
     while lo <= hi:
         mid = (lo + hi) // 2
         candidate = text[:mid].rstrip() + ell
@@ -50,28 +59,18 @@ def _fit_text(text: str, max_width: float, font: str, size: int) -> str:
             lo = mid + 1
         else:
             hi = mid - 1
+
     return best
 
 
-def _stage_label(stage: Stage) -> str:
-    return {
-        Stage.GROUND: "GROUND",
-        Stage.TOPOUT: "TOPOUT",
-        Stage.FINAL: "FINAL",
-    }[stage]
-
-
 def render_takeoff_pdf(
-    takeoff: Takeoff,
+    report: TakeoffReport,
     output_path: Path,
     *,
-    company_name: str = "LEZA'S PLUMBING",
-    created_at: datetime | None = None,
     style: PdfStyle | None = None,
 ) -> Path:
-    """Generate an MVP Take-Off PDF."""
+    """Render a Take-Off PDF using a prepared report DTO (no domain logic)."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    created_at = created_at or datetime.now()
     style = style or PdfStyle()
 
     c = Canvas(str(output_path), pagesize=style.page_size)
@@ -86,12 +85,11 @@ def render_takeoff_pdf(
         c.drawString(x, y, text)
 
     # ---------- Header ----------
-    draw_text(company_name, font=style.font_bold, size=style.title_size, x=x0, y=y)
+    draw_text(report.company_name, font=style.font_bold, size=style.title_size, x=x0, y=y)
     y -= style.line_height * 1.2
 
-    header = takeoff.header
     draw_text(
-        f"PROJECT: {header.project_name}    CONTRACTOR: {header.contractor_name}",
+        f"PROJECT: {report.project_name}    CONTRACTOR: {report.contractor_name}",
         font=style.font_bold,
         size=style.section_size,
         x=x0,
@@ -100,7 +98,7 @@ def render_takeoff_pdf(
     y -= style.line_height
 
     draw_text(
-        f"MODEL GROUP: {header.model_group_display}    STORIES: {header.stories}",
+        f"MODEL GROUP: {report.model_group_display}    STORIES: {report.stories}",
         font=style.font,
         size=style.font_size,
         x=x0,
@@ -109,7 +107,7 @@ def render_takeoff_pdf(
     y -= style.line_height
 
     draw_text(
-        f"CREATED AT: {created_at.strftime('%Y-%m-%d %H:%M')}",
+        f"CREATED AT: {report.created_at.strftime('%Y-%m-%d %H:%M')}",
         font=style.font,
         size=style.font_size,
         x=x0,
@@ -118,16 +116,17 @@ def render_takeoff_pdf(
     y -= style.line_height * 1.2
 
     # ---------- Column layout ----------
-    col_item = 0.12 * (x1 - x0)
-    col_desc = 0.36 * (x1 - x0)
-    col_price = 0.10 * (x1 - x0)
-    col_qty = 0.07 * (x1 - x0)
-    col_factor = 0.07 * (x1 - x0)
-    col_sub = 0.10 * (x1 - x0)
-    col_tax = 0.09 * (x1 - x0)
-    col_total = 0.09 * (x1 - x0)
+    table_width = x1 - x0
+    col_item = 0.12 * table_width
+    col_desc = 0.34 * table_width
+    col_price = 0.10 * table_width
+    col_qty = 0.07 * table_width
+    col_factor = 0.07 * table_width
+    col_sub = 0.10 * table_width
+    col_tax = 0.09 * table_width
+    col_total = 0.09 * table_width
 
-    cols = [
+    cols: list[tuple[str, float]] = [
         ("ITEM#", col_item),
         ("DESCRIPTION", col_desc),
         ("PRICE", col_price),
@@ -137,16 +136,24 @@ def render_takeoff_pdf(
         ("TAX", col_tax),
         ("TOTAL", col_total),
     ]
+    numeric_headers = {"PRICE", "QTY", "FACTOR", "SUBTOTAL", "TAX", "TOTAL"}
 
     def draw_row(values: list[str], ypos: float, *, bold: bool = False) -> None:
         font = style.font_bold if bold else style.font
         c.setFont(font, style.font_size)
 
         x = x0
+        pad = 2
+
         for (hdr, w), val in zip(cols, values, strict=True):
             if hdr == "DESCRIPTION":
-                val = _fit_text(val, w - 6, font, style.font_size)
-            c.drawString(x, ypos, val)
+                val = _fit_text(val, w - 2 * pad, font, style.font_size)
+                c.drawString(x + pad, ypos, val)
+            elif hdr in numeric_headers:
+                c.drawRightString(x + w - pad, ypos, val)
+            else:
+                c.drawString(x + pad, ypos, val)
+
             x += w
 
     def draw_table_header(ypos: float) -> float:
@@ -162,47 +169,40 @@ def render_takeoff_pdf(
             c.showPage()
             y = height - style.margin_top
 
-    def render_stage(stage: Stage, lines: Iterable[TakeoffLine]) -> None:
+    def render_section(section: ReportSection) -> None:
         nonlocal y
         ensure_space(6)
 
-        draw_text(
-            _stage_label(stage),
-            font=style.font_bold,
-            size=style.section_size,
-            x=x0,
-            y=y,
-        )
+        draw_text(section.title, font=style.font_bold, size=style.section_size, x=x0, y=y)
         y -= style.line_height
 
-        y = draw_table_header(y)
-
-        for ln in lines:
-            ensure_space(2)
-            t = ln.totals(tax_rate=takeoff.tax_rate)
-
-            values = [
-                ln.item.item_number or "",
-                ln.item.description,
-                _money(ln.item.unit_price),
-                f"{ln.qty}",
-                f"{ln.factor}",
-                _money(t.subtotal),
-                _money(t.tax),
-                _money(t.total),
-            ]
-            draw_row(values, y)
+        if not section.lines:
+            draw_text("(no items)", font=style.font, size=style.font_size, x=x0, y=y)
             y -= style.line_height
+        else:
+            y = draw_table_header(y)
+            for ln in section.lines:
+                ensure_space(2)
+                values = [
+                    ln.item_number,
+                    ln.description,
+                    _money(ln.unit_price),
+                    f"{ln.qty}",
+                    f"{ln.factor}",
+                    _money(ln.subtotal),
+                    _money(ln.tax),
+                    _money(ln.total),
+                ]
+                draw_row(values, y)
+                y -= style.line_height
 
         ensure_space(3)
-        sub, tax, total = takeoff.stage_totals(stage)
-
         c.setFont(style.font_bold, style.font_size)
         c.line(x0, y + 4, x1, y + 4)
         y -= style.line_height * 0.2
 
         draw_text(
-            f"{_stage_label(stage)} SUBTOTAL: {_money(sub)}",
+            f"{section.title} SUBTOTAL: {_money(section.subtotal)}",
             font=style.font_bold,
             size=style.font_size,
             x=x0,
@@ -211,7 +211,7 @@ def render_takeoff_pdf(
         y -= style.line_height
 
         draw_text(
-            f"{_stage_label(stage)} TAX: {_money(tax)}",
+            f"{section.title} TAX: {_money(section.tax)}",
             font=style.font_bold,
             size=style.font_size,
             x=x0,
@@ -220,7 +220,7 @@ def render_takeoff_pdf(
         y -= style.line_height
 
         draw_text(
-            f"{_stage_label(stage)} TOTAL: {_money(total)}",
+            f"{section.title} TOTAL: {_money(section.total)}",
             font=style.font_bold,
             size=style.font_size,
             x=x0,
@@ -228,12 +228,13 @@ def render_takeoff_pdf(
         )
         y -= style.line_height * 1.2
 
-    render_stage(Stage.GROUND, takeoff.lines_for_stage(Stage.GROUND))
-    render_stage(Stage.TOPOUT, takeoff.lines_for_stage(Stage.TOPOUT))
-    render_stage(Stage.FINAL, takeoff.lines_for_stage(Stage.FINAL))
+    # ---------- Sections ----------
+    for section in report.sections:
+        render_section(section)
 
+    # ---------- Grand totals ----------
     ensure_space(6)
-    gt = takeoff.grand_totals()
+    gt = report.grand_totals
 
     c.setFont(style.font_bold, style.section_size)
     c.line(x0, y + 6, x1, y + 6)
@@ -259,7 +260,7 @@ def render_takeoff_pdf(
     y -= style.line_height
 
     draw_text(
-        f"GRAND TOTAL: {_money(gt.total)}",
+        f"VALVE DISCOUNT: {_money(gt.valve_discount)}",
         font=style.font_bold,
         size=style.font_size,
         x=x0,
@@ -268,7 +269,7 @@ def render_takeoff_pdf(
     y -= style.line_height
 
     draw_text(
-        f"VALVE DISCOUNT: {_money(gt.valve_discount)}",
+        f"GRAND TOTAL: {_money(gt.total)}",
         font=style.font_bold,
         size=style.font_size,
         x=x0,

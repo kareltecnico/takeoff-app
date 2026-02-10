@@ -157,3 +157,52 @@ Implementation notes:
 
 Risk note:
 - Avoid opening the same SQLite DB simultaneously from two computers to prevent sync conflicts.
+
+# System Design — Take-Off App
+
+## Purpose
+Generate a Take-Off report from domain data and render it to different outputs (PDF, JSON, etc.)
+using a clean architecture approach.
+
+## High-level Flow
+1. Domain objects exist (Takeoff, TakeoffLine, Item, Stage).
+2. Application use-case orchestrates the process.
+3. Reporting layer builds a pure DTO (TakeoffReport).
+4. A renderer (port) turns that DTO into a file (adapter: PDF/JSON).
+
+## Layers
+
+### Domain (`app/domain/`)
+**What:** Core business rules and calculations.  
+**Depends on:** nothing else in the app.
+
+### Reporting (`app/reporting/`)
+**What:** Report DTOs + builder mapping from domain -> report DTO, plus renderer port definitions.  
+**Depends on:** Domain (for mapping inputs), stdlib.
+
+### Application (`app/application/`)
+**What:** Use-cases that orchestrate work (build report + call renderer).  
+**Depends on:** Domain + Reporting.
+
+### Infrastructure (`app/infrastructure/`)
+**What:** Concrete implementations of ports (ReportLab PDF, JSON debug, etc.).  
+**Depends on:** Reporting + external libraries.
+
+### Scripts (`scripts/`)
+**What:** Local demos / manual runs.  
+**Depends on:** Application + concrete infrastructure adapters.
+
+## Dependency Rules (Non-negotiable)
+- Domain MUST NOT import from reporting/application/infrastructure.
+- Reporting MAY import Domain (for mapping inputs).
+- Application MAY import Domain + Reporting.
+- Infrastructure MAY import Reporting (DTO + Port), plus external libs.
+
+## Current Renderers
+- PDF: `ReportLabTakeoffPdfRenderer` (ReportLab)
+- JSON: `DebugJsonTakeoffReportRenderer` (stdlib json)
+
+## Extension Points
+To add a new output format:
+1. Implement `TakeoffReportRenderer` in `app/infrastructure/`.
+2. Use `RenderTakeoffReport(renderer=YourRenderer())`.

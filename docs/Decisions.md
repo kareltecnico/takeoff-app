@@ -29,3 +29,40 @@ This file records key product and technical decisions with rationale.
 ## 2026-01-30 — Upgrades
 **Decision:** Defer upgrades workflow to v2.
 **Rationale:** Rare feature with higher complexity; MVP should focus on core take-off workflow first.
+
+# Decisions
+
+## 2026-02-09 — Introduce Reporting Layer (DTO + Renderer Port)
+**Decision:** Add `app/reporting/` with:
+- `TakeoffReport` DTO
+- `TakeoffReportRenderer` port (Protocol)
+- builder `build_takeoff_report()`
+
+**Why:**
+- Keep PDF generation free of domain logic.
+- Make outputs pluggable (PDF, JSON, future HTML/CSV).
+- Improve testability and maintainability.
+
+## 2026-02-09 — Clamp negative totals in Reports (Option A)
+**Decision:** In reporting builder, clamp `total_after_discount` to never be negative.
+
+**Why:**
+- Final displayed report should not show negative totals.
+- Domain remains source of truth; report is presentation-safe.
+
+## 2026-02-10 — Reporting layer and renderer ports
+
+We introduced a dedicated Reporting layer with report DTOs and a renderer port (Protocol).
+
+- Reporting DTOs: `TakeoffReport`, `ReportSection`, `ReportLine`, `ReportGrandTotals`
+- Builder: `build_takeoff_report(takeoff, ...)`
+- Renderer port: `TakeoffReportRenderer` (Protocol)
+- Infrastructure adapters: ReportLab PDF renderer, JSON debug renderer, CSV renderer
+
+Reason:
+- Keep Domain pure and independent from I/O concerns.
+- Enable multiple output formats without changing use cases.
+- Make architecture easier to test and extend.
+
+Decision:
+- Use Option A ("clamp") in reporting: final `total_after_discount` is clamped to `0.00` for display.

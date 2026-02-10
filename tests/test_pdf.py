@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -7,9 +10,10 @@ from app.domain.stage import Stage
 from app.domain.takeoff import Takeoff, TakeoffHeader
 from app.domain.takeoff_line import TakeoffLine
 from app.infrastructure.pdf_takeoff_reportlab import render_takeoff_pdf
+from app.reporting.builder import build_takeoff_report
 
 
-def test_pdf_is_generated_and_looks_like_pdf_header():
+def test_pdf_is_generated_and_looks_like_pdf_header() -> None:
     header = TakeoffHeader(
         project_name="ABESS",
         contractor_name="LENNAR",
@@ -50,12 +54,12 @@ def test_pdf_is_generated_and_looks_like_pdf_header():
     )
 
     takeoff = Takeoff(header=header, lines=lines)
+    report = build_takeoff_report(takeoff, created_at=datetime(2026, 1, 1, 0, 0, 0))
 
     with TemporaryDirectory() as td:
         out = Path(td) / "ABESS (P001-P002).pdf"
-        render_takeoff_pdf(takeoff, out)
+        render_takeoff_pdf(report, out)
 
-        assert out.exists()
         data = out.read_bytes()
-        assert data[:4] == b"%PDF"
-        assert len(data) > 1000
+        assert data.startswith(b"%PDF")
+        assert out.stat().st_size > 1_000
