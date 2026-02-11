@@ -11,13 +11,6 @@ from app.reporting.renderers import TakeoffReportRenderer
 
 @dataclass(frozen=True)
 class GenerateTakeoffReportOutput:
-    """
-    Application use case.
-
-    Builds a TakeoffReport DTO from the domain Takeoff and delegates
-    output generation to an injected renderer (PDF/JSON/CSV/etc).
-    """
-
     renderer: TakeoffReportRenderer
     company_name: str = "LEZA'S PLUMBING"
 
