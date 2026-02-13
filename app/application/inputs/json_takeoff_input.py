@@ -15,7 +15,9 @@ class JsonTakeoffInput(TakeoffInput):
     def __init__(self, path: Path) -> None:
         self._path = path
 
-    def load(self) -> Takeoff:
+    def load(self, path: Path | None = None) -> Takeoff:
+        if path is None:
+            raise SystemExit("JSON input requires a path")
         data = json.loads(self._path.read_text())
 
         header = TakeoffHeader(

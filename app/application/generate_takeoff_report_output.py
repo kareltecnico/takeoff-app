@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from app.config import AppConfig
 from app.domain.takeoff import Takeoff
 from app.reporting.builder import build_takeoff_report
 from app.reporting.renderers import TakeoffReportRenderer
@@ -12,7 +13,7 @@ from app.reporting.renderers import TakeoffReportRenderer
 @dataclass(frozen=True)
 class GenerateTakeoffReportOutput:
     renderer: TakeoffReportRenderer
-    company_name: str = "LEZA'S PLUMBING"
+    config: AppConfig = AppConfig()
 
     def __call__(
         self,
@@ -23,7 +24,7 @@ class GenerateTakeoffReportOutput:
     ) -> Path:
         report = build_takeoff_report(
             takeoff,
-            company_name=self.company_name,
+            company_name=self.config.company_name,
             created_at=created_at,
         )
         return self.renderer.render(report, output_path)

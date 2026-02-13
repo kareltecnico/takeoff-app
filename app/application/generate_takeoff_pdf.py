@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from app.application.generate_takeoff_report_output import GenerateTakeoffReportOutput
+from app.config import AppConfig
 from app.domain.takeoff import Takeoff
 from app.reporting.renderers import TakeoffReportRenderer
 
@@ -29,6 +30,6 @@ class GenerateTakeoffPdf:
     ) -> Path:
         use_case = GenerateTakeoffReportOutput(
             renderer=self.renderer,
-            company_name=self.company_name,
+            config=AppConfig(),
         )
         return use_case(takeoff, output_path, created_at=created_at)

@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from app.application.generate_takeoff_report_output import GenerateTakeoffReportOutput
+from app.config import AppConfig
 from app.infrastructure.csv_takeoff_renderer import CsvTakeoffReportRenderer
 from app.infrastructure.debug_takeoff_json_renderer import DebugJsonTakeoffReportRenderer
 from app.infrastructure.pdf_takeoff_reportlab import ReportLabTakeoffPdfRenderer
@@ -36,7 +37,7 @@ def main() -> None:
 
     output.parent.mkdir(parents=True, exist_ok=True)
 
-    use_case = GenerateTakeoffReportOutput(renderer=renderer)
+    use_case = GenerateTakeoffReportOutput(renderer=renderer, config=AppConfig())
     use_case(takeoff, output)
 
     print(f"{args.format.upper()} generated at: {output.resolve()}")

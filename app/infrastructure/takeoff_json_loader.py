@@ -6,6 +6,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from app.application.input_sources import TakeoffInputSource
 from app.domain.item import Item
 from app.domain.stage import Stage
 from app.domain.takeoff import Takeoff, TakeoffHeader
@@ -61,8 +62,10 @@ def _as_stage(x: Any, *, ctx: str) -> Stage:
 
 
 @dataclass(frozen=True)
-class TakeoffJsonLoader:
-    def load(self, path: Path) -> Takeoff:
+class TakeoffJsonLoader(TakeoffInputSource):
+    def load(self, path: Path | None = None) -> Takeoff:
+        if path is None:
+            raise TakeoffJsonError("Path is required for JSON input")
         data = json.loads(path.read_text(encoding="utf-8"))
 
         if not isinstance(data, dict):
@@ -90,6 +93,10 @@ class TakeoffJsonLoader:
         )
 
         models_raw = _req(header_obj, "models", ctx="header")
+        for i, m in enumerate(models_raw):
+            if not isinstance(m, str):
+                raise TakeoffJsonError(f"Expected string at header.models[{i}]")
+        models = tuple(models_raw)
         if not isinstance(models_raw, list):
             raise TakeoffJsonError("Expected array at header.models")
         models = tuple(models_raw)
@@ -106,6 +113,9 @@ class TakeoffJsonLoader:
             _req(data, "tax_rate", ctx="root"),
             ctx="root.tax_rate",
         )
+        
+        if tax_rate < Decimal("0") or tax_rate > Decimal("1"):
+            raise TakeoffJsonError("root.tax_rate must be between 0 and 1")
 
         lines_obj = _req(data, "lines", ctx="root")
         if not isinstance(lines_obj, list):
@@ -137,6 +147,8 @@ class TakeoffJsonLoader:
                 _req(item_obj, "unit_price", ctx=f"{ctx}.item"),
                 ctx=f"{ctx}.item.unit_price",
             )
+            if unit_price < Decimal("0"):
+                raise TakeoffJsonError(f"{ctx}.item.unit_price must be >= 0")            
             taxable = _as_bool(
                 _req(item_obj, "taxable", ctx=f"{ctx}.item"),
                 ctx=f"{ctx}.item.taxable",
@@ -150,21 +162,26 @@ class TakeoffJsonLoader:
                 unit_price=unit_price,
                 taxable=taxable,
             )
+            
+            qty = _as_decimal(_req(ln, "qty", ctx=ctx), ctx=f"{ctx}.qty")
+            factor = _as_decimal(_req(ln, "factor", ctx=ctx), ctx=f"{ctx}.factor")
+            sort_order = _as_int(_req(ln, "sort_order", ctx=ctx), ctx=f"{ctx}.sort_order")
+
+            if qty < Decimal("0"):
+                raise TakeoffJsonError(f"{ctx}.qty must be >= 0")
+            if factor < Decimal("0"):
+                raise TakeoffJsonError(f"{ctx}.factor must be >= 0")
+            if sort_order < 0:
+                raise TakeoffJsonError(f"{ctx}.sort_order must be >= 0")
 
             lines.append(
                 TakeoffLine(
                     item=item,
                     stage=_as_stage(_req(ln, "stage", ctx=ctx), ctx=f"{ctx}.stage"),
-                    qty=_as_decimal(_req(ln, "qty", ctx=ctx), ctx=f"{ctx}.qty"),
-                    factor=_as_decimal(
-                        _req(ln, "factor", ctx=ctx),
-                        ctx=f"{ctx}.factor",
-                    ),
-                    sort_order=_as_int(
-                        _req(ln, "sort_order", ctx=ctx),
-                        ctx=f"{ctx}.sort_order",
-                    ),
+                    qty=qty,
+                    factor=factor,
+                    sort_order=sort_order,
                 )
             )
-
+         
         return Takeoff(header=header, tax_rate=tax_rate, lines=tuple(lines))
