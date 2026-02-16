@@ -21,6 +21,7 @@ The goal is: **domain never depends on application or infrastructure**, and rend
   - `app.application`
   - `app.infrastructure`
   - external I/O libs (ReportLab, csv, json, database clients, etc.)
+  - reglas del negocio + cálculos (sin IO).
 
 ### Reporting (`app/reporting/`)
 - DTOs for rendering: `TakeoffReport`, `ReportSection`, `ReportLine`, `ReportGrandTotals`.
@@ -34,6 +35,7 @@ Reporting is allowed to depend on Domain (types + computed results), but should 
   - Domain input objects
   - Reporting builder
   - a renderer adapter via Protocol (port)
+  - orquesta flujos (load/save/render), valida reglas de comando, coordina dependencias.
 - Example:
   - `GenerateTakeoffPdf` builds a report DTO then calls `renderer.render(...)`
 
@@ -44,9 +46,13 @@ Application should not import Infrastructure implementations.
   - `ReportLabTakeoffPdfRenderer` (PDF)
   - `DebugJsonTakeoffReportRenderer` (JSON)
   - `CsvTakeoffReportRenderer` (CSV)
+  - `IO` (PDF/CSV/JSON, repos, loaders/codecs).
 - Infrastructure may depend on:
   - Reporting models + renderer Protocol
   - external libs like ReportLab, csv, json, etc.
+
+### CLI (Adapters)
+- parsea args y llama use cases (sin lógica de negocio).
 
 ### Scripts (`scripts/`)
 - Local developer entry points:
@@ -67,6 +73,7 @@ Allowed dependencies (arrows point to what you can import):
 - `application → domain + reporting`
 - `infrastructure → reporting (+ external libs)`
 - `scripts → all layers`
+- `Domain no import Application/Infrastructure.`
 
 Disallowed examples:
 - `domain → infrastructure`
@@ -81,6 +88,7 @@ Disallowed examples:
 2. `GenerateTakeoffPdf` (Application) calls `build_takeoff_report` (Reporting).
 3. Use case calls `renderer.render(report, output_path)` (Reporting port).
 4. A concrete renderer in Infrastructure writes output (PDF/JSON/CSV).
+5. referencia a docs/DataFlow.md y a ADRs (ej. renderers).
 
 ---
 
@@ -103,3 +111,4 @@ Run:
 - `pytest`
 
 Architecture tests ensure importing `app.domain` never pulls `application` or `infrastructure`.
+
