@@ -4,21 +4,22 @@
 # Python
 __pycache__/
 *.pyc
-
-# SQLite
-*.db
-*.sqlite
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
 
 # Environment / secrets
 .env
-
-# PDFs outputs (optional, we can decide later)
-outputs/
 
 # Packaging artifacts
 *.egg-info/
 app/*.egg-info/
 
-# Local generated artifacts
+# Local generated artifacts / outputs
 outputs/
 *.pdf
+
+# Local app data (generated)
+data/
