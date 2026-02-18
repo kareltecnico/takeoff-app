@@ -112,3 +112,38 @@ Run:
 
 Architecture tests ensure importing `app.domain` never pulls `application` or `infrastructure`.
 
+---
+
+## Application Orchestration Layer (CLI + Use Cases)
+
+The CLI (`app/cli.py`) acts strictly as an orchestration layer.  
+It does not contain business logic.
+
+Responsibilities:
+
+- Parse command-line arguments
+- Validate flags and combinations
+- Instantiate infrastructure adapters (renderers, repositories)
+- Call application use cases
+
+Main use cases:
+
+- `GenerateTakeoffReportOutput`
+- `SaveTakeoff`
+- `LoadTakeoff`
+- `RenderTakeoff`
+
+Important architectural decisions:
+
+1. CLI builds the `Takeoff` exactly once.
+2. Validation is centralized in helper functions.
+3. Repository access is abstracted via `TakeoffRepository`.
+4. Infrastructure (PDF/CSV/JSON renderers) implements `TakeoffReportRenderer`.
+5. Business logic remains isolated in the `domain` layer.
+
+This ensures:
+
+- Clean separation of concerns
+- Replaceable infrastructure
+- Testable application layer
+- CLI remains thin and stable

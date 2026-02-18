@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Protocol
+# Backwards-compatible alias:
+# We keep this module because other code may import TakeoffInput from here.
+from app.application.input_sources import TakeoffInputSource as TakeoffInput
 
-from app.domain.takeoff import Takeoff
-
-
-class TakeoffInput(Protocol):
-    def load(self, path: Path | None = None) -> Takeoff: ...
+__all__ = ["TakeoffInput"]
