@@ -1,149 +1,124 @@
 # Architecture
 
-This project follows a Clean Architecture / Hexagonal approach:
+This project follows a Clean Architecture / Hexagonal approach.
 
-- **Domain** contains the business rules (pure Python, no I/O).
-- **Application** orchestrates use cases (depends on Domain + Reporting).
-- **Reporting** builds report DTOs and defines renderer ports (Protocol).
-- **Infrastructure** implements adapters (PDF/CSV/JSON renderers, etc.).
-- **Scripts** are developer utilities to run sample outputs.
-
-The goal is: **domain never depends on application or infrastructure**, and rendering is done through a renderer interface.
+Core principle:
+> Domain never depends on Application or Infrastructure.
 
 ---
 
-## Layer responsibilities
+# Layers
 
-### Domain (`app/domain/`)
-- Entities and value objects: `Takeoff`, `TakeoffLine`, `Item`, `Stage`, totals, money helpers.
-- Pure calculations and invariants.
-- No imports from:
-  - `app.application`
-  - `app.infrastructure`
-  - external I/O libs (ReportLab, csv, json, database clients, etc.)
-  - reglas del negocio + cálculos (sin IO).
+## Domain (`app/domain/`)
+- Pure business rules.
+- Entities and value objects (`Takeoff`, `TakeoffLine`, totals, money).
+- No I/O.
+- No infrastructure imports.
+- No application imports.
 
-### Reporting (`app/reporting/`)
-- DTOs for rendering: `TakeoffReport`, `ReportSection`, `ReportLine`, `ReportGrandTotals`.
-- Builder/mapping from domain → DTO: `build_takeoff_report(...)`
-- Renderer port/interface: `TakeoffReportRenderer` (Protocol)
+---
 
-Reporting is allowed to depend on Domain (types + computed results), but should remain I/O-free.
+## Reporting (`app/reporting/`)
+- Report DTOs (`TakeoffReport`, sections, lines).
+- Report builder (`build_takeoff_report`).
+- Renderer port (`TakeoffReportRenderer` Protocol).
+- No concrete infrastructure logic.
 
-### Application (`app/application/`)
-- Use cases that coordinate:
-  - Domain input objects
+---
+
+## Application (`app/application/`)
+- Use case orchestration.
+- Coordinates:
+  - Domain
   - Reporting builder
-  - a renderer adapter via Protocol (port)
-  - orquesta flujos (load/save/render), valida reglas de comando, coordina dependencias.
-- Example:
-  - `GenerateTakeoffPdf` builds a report DTO then calls `renderer.render(...)`
+  - Renderer port
+  - Repository port
 
-Application should not import Infrastructure implementations.
+Key use cases:
 
-### Infrastructure (`app/infrastructure/`)
-- Adapters implementing ports:
-  - `ReportLabTakeoffPdfRenderer` (PDF)
-  - `DebugJsonTakeoffReportRenderer` (JSON)
-  - `CsvTakeoffReportRenderer` (CSV)
-  - `IO` (PDF/CSV/JSON, repos, loaders/codecs).
-- Infrastructure may depend on:
-  - Reporting models + renderer Protocol
-  - external libs like ReportLab, csv, json, etc.
-
-### CLI (Adapters)
-- parsea args y llama use cases (sin lógica de negocio).
-
-### Scripts (`scripts/`)
-- Local developer entry points:
-  - `render_sample_pdf.py`
-  - `render_sample_json.py`
-  - `render_sample_csv.py`
-
-Scripts are allowed to assemble real dependencies.
-
----
-
-## Dependency rules
-
-Allowed dependencies (arrows point to what you can import):
-
-- `domain → (nothing)`
-- `reporting → domain`
-- `application → domain + reporting`
-- `infrastructure → reporting (+ external libs)`
-- `scripts → all layers`
-- `Domain no import Application/Infrastructure.`
-
-Disallowed examples:
-- `domain → infrastructure`
-- `domain → application`
-- `application → infrastructure` (should use ports/Protocols instead)
-
----
-
-## Main flow (Generate PDF / JSON / CSV)
-
-1. A script builds a `Takeoff` (Domain).
-2. `GenerateTakeoffPdf` (Application) calls `build_takeoff_report` (Reporting).
-3. Use case calls `renderer.render(report, output_path)` (Reporting port).
-4. A concrete renderer in Infrastructure writes output (PDF/JSON/CSV).
-5. referencia a docs/DataFlow.md y a ADRs (ej. renderers).
-
----
-
-## Key design decision: clamping totals in reports
-
-Reports use Option A:
-- Domain can compute negative `total_after_discount` (if discount exceeds total).
-- Reporting clamps to `0.00` for presentation:
-  - `total_after_discount = max(Decimal("0.00"), gt.total_after_discount)`
-
-This ensures the final displayed report never shows negative totals.
-
----
-
-## How to validate architecture
-
-Run:
-- `ruff check . --fix`
-- `mypy app`
-- `pytest`
-
-Architecture tests ensure importing `app.domain` never pulls `application` or `infrastructure`.
-
----
-
-## Application Orchestration Layer (CLI + Use Cases)
-
-The CLI (`app/cli.py`) acts strictly as an orchestration layer.  
-It does not contain business logic.
-
-Responsibilities:
-
-- Parse command-line arguments
-- Validate flags and combinations
-- Instantiate infrastructure adapters (renderers, repositories)
-- Call application use cases
-
-Main use cases:
-
-- `GenerateTakeoffReportOutput`
-- `SaveTakeoff`
-- `LoadTakeoff`
+- `ResolveTakeoff`
 - `RenderTakeoff`
+- `SaveTakeoff`
+- `SaveTakeoffFromInput`
+- `LoadTakeoff`
 
-Important architectural decisions:
+### Input Abstraction (Important)
 
-1. CLI builds the `Takeoff` exactly once.
-2. Validation is centralized in helper functions.
-3. Repository access is abstracted via `TakeoffRepository`.
-4. Infrastructure (PDF/CSV/JSON renderers) implements `TakeoffReportRenderer`.
-5. Business logic remains isolated in the `domain` layer.
+The system uses a polymorphic input model:
 
-This ensures:
+`TakeoffInputSource` (Protocol)
 
-- Clean separation of concerns
-- Replaceable infrastructure
-- Testable application layer
-- CLI remains thin and stable
+Concrete implementations:
+- `JsonTakeoffInput`
+- `FactoryTakeoffInput`
+- `RepoTakeoffInput`
+
+This removes conditional logic from use cases.
+
+Application never reads CLI flags directly.
+
+---
+
+## Infrastructure (`app/infrastructure/`)
+Implements adapters:
+
+- PDF renderer (ReportLab)
+- JSON debug renderer
+- CSV renderer
+- File-based repository
+- RendererRegistry (maps OutputFormat → concrete renderer)
+
+Infrastructure depends on Reporting.
+Application depends only on the RendererFactory Protocol.
+
+---
+
+## CLI
+
+CLI responsibilities:
+
+- Parse args
+- Validate combinations
+- Instantiate infrastructure adapters
+- Build `TakeoffInputSource`
+- Call use cases
+
+CLI contains zero business logic.
+
+---
+
+# Dependency Rules
+
+Allowed:
+
+- domain → nothing
+- reporting → domain
+- application → domain + reporting
+- infrastructure → reporting
+- cli → all layers
+
+Forbidden:
+
+- domain → infrastructure
+- domain → application
+- application → concrete infrastructure
+
+---
+
+# Main Flow (Render)
+
+1. CLI builds `TakeoffInputSource`
+2. `RenderTakeoff` calls `ResolveTakeoff`
+3. Reporting builder maps domain → report DTO
+4. RendererRegistry selects renderer
+5. Infrastructure writes output
+
+---
+
+# Main Flow (Save)
+
+1. CLI builds `TakeoffInputSource`
+2. `SaveTakeoffFromInput`
+3. ResolveTakeoff
+4. SaveTakeoff (repository)
+5. File stored locally
