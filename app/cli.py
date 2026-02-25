@@ -10,19 +10,26 @@ from app.application.input_sources import TakeoffInputSource
 from app.application.inputs.factory_takeoff_input import FactoryTakeoffInput
 from app.application.inputs.json_takeoff_input import JsonTakeoffInput
 from app.application.inputs.repo_takeoff_input import RepoTakeoffInput
-from app.application.items_catalog import ItemsCatalog
 from app.application.render_takeoff import RenderTakeoff
+from app.application.save_takeoff import SaveTakeoff
+from app.application.seed_takeoff_from_template import SeedTakeoffFromTemplate
 from app.config import AppConfig
 from app.domain.output_format import OutputFormat
-from app.infrastructure.file_item_repository import FileItemRepository
 from app.infrastructure.file_takeoff_repository import FileTakeoffRepository
 from app.infrastructure.renderer_registry import RendererRegistry
-from app.application.projects import Projects
-from app.infrastructure.file_project_repository import FileProjectRepository
+from app.infrastructure.sqlite_db import SqliteDb
+from app.infrastructure.sqlite_item_repository import SqliteItemRepository
+from app.infrastructure.sqlite_project_repository import SqliteProjectRepository
+from app.infrastructure.sqlite_takeoff_line_repository import SqliteTakeoffLineRepository
+from app.infrastructure.sqlite_takeoff_repository import SqliteTakeoffRepository
+from app.infrastructure.sqlite_template_line_repository import SqliteTemplateLineRepository
+from app.infrastructure.sqlite_template_repository import SqliteTemplateRepository
+from app.infrastructure.takeoff_json_loader import TakeoffJsonLoader
 
 # -----------------------------------
 # Helpers
 # -----------------------------------
+
 
 def _require_non_empty(value: str | None, flag: str) -> str | None:
     if value is None:
@@ -45,18 +52,10 @@ def _validate_out_extension(fmt: OutputFormat, out: Path) -> None:
         raise SystemExit(f"--out must end with {expected} for --format {fmt.value}")
 
 
-def _parse_bool(value: str, flag: str) -> bool:
-    v = value.strip().lower()
-    if v in {"true", "1", "yes", "y", "on"}:
-        return True
-    if v in {"false", "0", "no", "n", "off"}:
-        return False
-    raise SystemExit(f"Invalid {flag}: {value!r} (use true/false)")
-
-
 # -----------------------------------
 # Validation
 # -----------------------------------
+
 
 def _validate_render_args(args: argparse.Namespace) -> None:
     fmt = OutputFormat(args.format)
@@ -109,235 +108,58 @@ def _validate_save_args(args: argparse.Namespace) -> None:
 # Main
 # -----------------------------------
 
+
 def main(argv: list[str] | None = None) -> int:
     try:
         parser = argparse.ArgumentParser(prog="takeoff-app")
+
+        # Global (SQLite)
+        parser.add_argument("--db-path", default="data/takeoff.db")
+
         sub = parser.add_subparsers(dest="cmd", required=True)
 
         # -------------------------
-        # save
+        # save (file repo)
         # -------------------------
-        save_parser = sub.add_parser("save")
-        save_parser.add_argument("--input", choices=["sample", "json"], default="sample")
-        save_parser.add_argument("--input-path", default=None)
-        save_parser.add_argument("--repo-dir", default="data/takeoffs")
-
-        # -------------------------
-        # render
-        # -------------------------
-        render_parser = sub.add_parser("render")
-        render_parser.add_argument("--input", choices=["sample", "json"], default="sample")
-        render_parser.add_argument("--input-path", default=None)
-        render_parser.add_argument("--id", default=None)
-        render_parser.add_argument("--repo-dir", default="data/takeoffs")
-        render_parser.add_argument("--format", choices=["pdf", "json", "csv"], required=True)
-        render_parser.add_argument("--out", required=True)
-        render_parser.add_argument("--company-name", required=False)
-        render_parser.add_argument("--tax-rate", required=False)
+        save = sub.add_parser("save")
+        save.add_argument("--input", choices=["sample", "json"], default="sample")
+        save.add_argument("--input-path", default=None)
+        save.add_argument("--repo-dir", default="data/takeoffs")
 
         # -------------------------
-        # items (catalog)
+        # render (file repo)
         # -------------------------
-        items_parser = sub.add_parser("items")
-        items_sub = items_parser.add_subparsers(dest="items_cmd", required=True)
-        items_parser.add_argument("--catalog-path", default="data/items_catalog.json")
-
-        items_add = items_sub.add_parser("add")
-        items_add.add_argument("--code", required=True)
-        items_add.add_argument("--description", required=True)
-        items_add.add_argument("--unit-price", required=True)
-        items_add.add_argument("--taxable", required=True)  # true/false
-        items_add.add_argument("--item-number", default=None)
-        items_add.add_argument("--details", default=None)
-        items_add.add_argument("--active", default="true")  # true/false
-
-        items_list_parser = items_sub.add_parser("list")
-        items_list_parser.add_argument("--include-inactive", action="store_true")
-
-        items_get = items_sub.add_parser("get")
-        items_get.add_argument("--code", required=True)
-
-        items_update = items_sub.add_parser("update")
-        items_update.add_argument("--code", required=True)
-        items_update.add_argument("--description", default=None)
-        items_update.add_argument("--unit-price", default=None)
-        items_update.add_argument("--taxable", default=None)  # true/false
-        items_update.add_argument("--item-number", default=None)
-        items_update.add_argument("--details", default=None)
-        items_update.add_argument("--active", default=None)  # true/false
-
-        items_delete = items_sub.add_parser("delete")
-        items_delete.add_argument("--code", required=True)
+        render = sub.add_parser("render")
+        render.add_argument("--input", choices=["sample", "json"], default="sample")
+        render.add_argument("--input-path", default=None)
+        render.add_argument("--id", default=None)
+        render.add_argument("--repo-dir", default="data/takeoffs")
+        render.add_argument("--format", choices=["pdf", "json", "csv"], required=True)
+        render.add_argument("--out", required=True)
+        render.add_argument("--company-name", required=False)
+        render.add_argument("--tax-rate", required=False)
 
         # -------------------------
-        # projects
+        # takeoffs (SQLite)
         # -------------------------
-        projects_parser = sub.add_parser("projects")
-        projects_sub = projects_parser.add_subparsers(dest="projects_cmd", required=True)
-        projects_parser.add_argument("--projects-path", default="data/projects.json")
+        takeoffs = sub.add_parser("takeoffs")
+        takeoffs_sub = takeoffs.add_subparsers(dest="takeoffs_cmd", required=True)
 
-        projects_add = projects_sub.add_parser("add")
-        projects_add.add_argument("--code", required=True)
-        projects_add.add_argument("--name", required=True)
-        projects_add.add_argument("--contractor", default=None)
-        projects_add.add_argument("--foreman", default=None)
-        projects_add.add_argument("--active", default="true")  # true/false
+        seed = takeoffs_sub.add_parser("seed")
+        seed.add_argument("--project", required=True)
+        seed.add_argument("--template", required=True)
+        seed.add_argument("--tax-rate", required=False)
 
-        projects_list = projects_sub.add_parser("list")
-        projects_list.add_argument("--include-inactive", action="store_true")
+        lst = takeoffs_sub.add_parser("list")
+        lst.add_argument("--project", required=True)
 
-        projects_get = projects_sub.add_parser("get")
-        projects_get.add_argument("--code", required=True)
-
-        projects_update = projects_sub.add_parser("update")
-        projects_update.add_argument("--code", required=True)
-        projects_update.add_argument("--name", default=None)
-        projects_update.add_argument("--contractor", default=None)
-        projects_update.add_argument("--foreman", default=None)
-        projects_update.add_argument("--active", default=None)  # true/false
-
-        projects_delete = projects_sub.add_parser("delete")
-        projects_delete.add_argument("--code", required=True)
+        show = takeoffs_sub.add_parser("show")
+        show.add_argument("--id", required=True)
 
         args = parser.parse_args(argv)
-        
-        # -------------------------
-        # ITEMS HANDLER
-        # -------------------------
-        if args.cmd == "items":
-            item_repo = FileItemRepository(path=Path(args.catalog_path))
-            catalog = ItemsCatalog(repo=item_repo)
 
-            if args.items_cmd == "add":
-                catalog.add(
-                    code=args.code,
-                    description=args.description,
-                    unit_price=_parse_decimal(args.unit_price, "--unit-price"),
-                    taxable=_parse_bool(args.taxable, "--taxable"),
-                    item_number=args.item_number,
-                    details=args.details,
-                    is_active=_parse_bool(args.active, "--active"),
-                )
-                print(f"Item saved: {args.code}")
-                return 0
-
-            if args.items_cmd == "list":
-                item_list = catalog.list(include_inactive=args.include_inactive)
-                if not item_list:
-                    print("(no items)")
-                    return 0
-                for it in item_list:
-                    active = "active" if it.is_active else "inactive"
-                    tax = "taxable" if it.taxable else "non-taxable"
-                    print(f"{it.code} | {it.description} | {it.unit_price} | {tax} | {active}")
-                return 0
-
-            if args.items_cmd == "get":
-                it = catalog.get(code=args.code)
-                print(f"code: {it.code}")
-                print(f"item_number: {it.item_number}")
-                print(f"description: {it.description}")
-                print(f"details: {it.details}")
-                print(f"unit_price: {it.unit_price}")
-                print(f"taxable: {it.taxable}")
-                print(f"is_active: {it.is_active}")
-                return 0
-
-            if args.items_cmd == "update":
-                unit_price = None
-                if args.unit_price is not None:
-                    unit_price = _parse_decimal(args.unit_price, "--unit-price")
-
-                taxable = None
-                if args.taxable is not None:
-                    taxable = _parse_bool(args.taxable, "--taxable")
-
-                is_active = None
-                if args.active is not None:
-                    is_active = _parse_bool(args.active, "--active")
-
-                catalog.update(
-                    code=args.code,
-                    description=args.description,
-                    unit_price=unit_price,
-                    taxable=taxable,
-                    item_number=args.item_number,
-                    details=args.details,
-                    is_active=is_active,
-                )
-                print(f"Item updated: {args.code}")
-                return 0
-
-            if args.items_cmd == "delete":
-                catalog.delete(code=args.code)
-                print(f"Item deleted: {args.code}")
-                return 0
-
-            raise AssertionError("Unreachable: unknown items command")
-        
-        # -------------------------
-        # PROJECTS HANDLER
-        # -------------------------
-        if args.cmd == "projects":
-            project_repo = FileProjectRepository(path=Path(args.projects_path))
-            projects = Projects(repo=project_repo)
-
-            if args.projects_cmd == "add":
-                projects.add(
-                    code=args.code,
-                    name=args.name,
-                    contractor=args.contractor,
-                    foreman=args.foreman,
-                    is_active=_parse_bool(args.active, "--active"),
-                )
-                print(f"Project saved: {args.code}")
-                return 0
-
-            if args.projects_cmd == "list":
-                project_list = projects.list(include_inactive=args.include_inactive)
-                if not project_list:
-                    print("(no projects)")
-                    return 0
-                for p in project_list:
-                    active = "active" if p.is_active else "inactive"
-                    print(f"{p.code} | {p.name} | contractor={p.contractor} | foreman={p.foreman} | {active}")
-                return 0
-
-            if args.projects_cmd == "get":
-                p = projects.get(code=args.code)
-                print(f"code: {p.code}")
-                print(f"name: {p.name}")
-                print(f"contractor: {p.contractor}")
-                print(f"foreman: {p.foreman}")
-                print(f"is_active: {p.is_active}")
-                return 0
-
-            if args.projects_cmd == "update":
-                is_active = None
-                if args.active is not None:
-                    is_active = _parse_bool(args.active, "--active")
-
-                projects.update(
-                    code=args.code,
-                    name=args.name,
-                    contractor=args.contractor,
-                    foreman=args.foreman,
-                    is_active=is_active,
-                )
-                print(f"Project updated: {args.code}")
-                return 0
-
-            if args.projects_cmd == "delete":
-                projects.delete(code=args.code)
-                print(f"Project deleted: {args.code}")
-                return 0
-
-            raise AssertionError("Unreachable: unknown projects command")
-
-        # -------------------------
-        # takeoff repos/config (for save/render)
-        # -------------------------
-        takeoff_repo = FileTakeoffRepository(base_dir=Path(args.repo_dir))
+        # File repo (existing)
+        file_repo = FileTakeoffRepository(base_dir=Path(getattr(args, "repo_dir", "data/takeoffs")))
         company_name = getattr(args, "company_name", None) or AppConfig().company_name
         config = AppConfig(company_name=company_name)
         sample_builder = BuildSampleTakeoff()
@@ -348,15 +170,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "save":
             _validate_save_args(args)
 
-            save_input: TakeoffInputSource
             if args.input == "json":
-                save_input = JsonTakeoffInput(path=Path(args.input_path))
+                takeoff = TakeoffJsonLoader().load(Path(args.input_path))
             else:
-                save_input = FactoryTakeoffInput(factory=sample_builder)
+                takeoff = sample_builder()
 
-            from app.application.save_takeoff_from_input import SaveTakeoffFromInput
-
-            stored = SaveTakeoffFromInput(repo=takeoff_repo)(takeoff_input=save_input)
+            stored = SaveTakeoff(repo=file_repo)(takeoff)
             print(f"SAVED takeoff id={stored.id} path={stored.path.resolve()}")
             return 0
 
@@ -376,7 +195,7 @@ def main(argv: list[str] | None = None) -> int:
 
             takeoff_input: TakeoffInputSource
             if args.id:
-                takeoff_input = RepoTakeoffInput(repo=takeoff_repo, takeoff_id=args.id)
+                takeoff_input = RepoTakeoffInput(repo=file_repo, takeoff_id=args.id)
             elif args.input == "json":
                 takeoff_input = JsonTakeoffInput(path=Path(args.input_path))
             else:
@@ -396,6 +215,78 @@ def main(argv: list[str] | None = None) -> int:
 
             print(f"{fmt.value.upper()} generated at: {rendered_path.resolve()}")
             return 0
+
+        # -------------------------
+        # TAKEOFFS (SQLite)
+        # -------------------------
+        if args.cmd == "takeoffs":
+            conn = SqliteDb(path=Path(args.db_path)).connect()
+            try:
+                item_repo = SqliteItemRepository(conn=conn)
+                project_repo = SqliteProjectRepository(conn=conn)
+                template_repo = SqliteTemplateRepository(conn=conn)
+                template_line_repo = SqliteTemplateLineRepository(conn=conn)
+                takeoff_repo = SqliteTakeoffRepository(conn=conn)
+                takeoff_line_repo = SqliteTakeoffLineRepository(conn=conn)
+
+                if args.takeoffs_cmd == "seed":
+                    tax_rate: Decimal | None = None
+                    if args.tax_rate:
+                        tax_rate = _parse_decimal(args.tax_rate, "--tax-rate")
+
+                    use_case = SeedTakeoffFromTemplate(
+                        project_repo=project_repo,
+                        template_repo=template_repo,
+                        template_line_repo=template_line_repo,
+                        item_repo=item_repo,
+                        takeoff_repo=takeoff_repo,
+                        takeoff_line_repo=takeoff_line_repo,
+                    )
+
+                    takeoff_id = use_case(
+                        project_code=args.project,
+                        template_code=args.template,
+                        tax_rate_override=tax_rate,
+                    )
+
+                    print(
+                        f"TAKEOFF seeded id={takeoff_id} "
+                        f"project={args.project} template={args.template}"
+                    )
+                    return 0
+
+                if args.takeoffs_cmd == "list":
+                    rows = takeoff_repo.list_for_project(project_code=args.project)
+                    for t in rows:
+                        print(
+                            f"{t.takeoff_id} | project={t.project_code} | "
+                            f"template={t.template_code} | "
+                            f"tax_rate={t.tax_rate} | created_at={t.created_at}"
+                        )
+                    return 0
+
+                if args.takeoffs_cmd == "show":
+                    t = takeoff_repo.get(takeoff_id=args.id)
+                    print(
+                        f"{t.takeoff_id} | project={t.project_code} | "
+                        f"template={t.template_code} | "
+                        f"tax_rate={t.tax_rate} | "
+                        f"created_at={t.created_at}"
+                    )
+                    print("---- lines ----")
+                    lines = takeoff_line_repo.list_for_takeoff(takeoff_id=args.id)
+                    for ln in lines:
+                        taxable = "taxable" if ln.taxable_snapshot else "non-taxable"
+                        print(
+                            f"{ln.item_code} | qty={ln.qty} | {taxable} | "
+                            f"unit_price={ln.unit_price_snapshot} | {ln.description_snapshot}"
+                        )
+                    return 0
+
+                raise AssertionError("Unreachable: unknown takeoffs command")
+
+            finally:
+                conn.close()
 
         raise AssertionError("Unreachable: unknown command")
 

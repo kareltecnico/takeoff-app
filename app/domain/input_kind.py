@@ -1,6 +1,8 @@
-from enum import Enum
+from __future__ import annotations
+
+from enum import StrEnum
 
 
-class InputKind(str, Enum):
+class InputKind(StrEnum):
     SAMPLE = "sample"
     JSON = "json"

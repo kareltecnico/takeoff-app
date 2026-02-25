@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class Stage(str, Enum):
+class Stage(StrEnum):
     GROUND = "ground"
     TOPOUT = "topout"
     FINAL = "final"
