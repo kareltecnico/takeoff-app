@@ -11,10 +11,12 @@ from app.application.inputs.factory_takeoff_input import FactoryTakeoffInput
 from app.application.inputs.json_takeoff_input import JsonTakeoffInput
 from app.application.inputs.repo_takeoff_input import RepoTakeoffInput
 from app.application.render_takeoff import RenderTakeoff
+from app.application.render_takeoff_from_snapshot import RenderTakeoffFromSnapshot
 from app.application.save_takeoff import SaveTakeoff
 from app.application.seed_takeoff_from_template import SeedTakeoffFromTemplate
 from app.config import AppConfig
 from app.domain.output_format import OutputFormat
+from app.domain.project import Project
 from app.infrastructure.file_takeoff_repository import FileTakeoffRepository
 from app.infrastructure.renderer_registry import RendererRegistry
 from app.infrastructure.sqlite_db import SqliteDb
@@ -140,6 +142,28 @@ def main(argv: list[str] | None = None) -> int:
         render.add_argument("--tax-rate", required=False)
 
         # -------------------------
+        # projects (SQLite)
+        # -------------------------
+        projects = sub.add_parser("projects")
+        projects_sub = projects.add_subparsers(dest="projects_cmd", required=True)
+
+        p_add = projects_sub.add_parser("add")
+        p_add.add_argument("--code", required=True)
+        p_add.add_argument("--name", required=True)
+        p_add.add_argument("--contractor", required=True)
+        p_add.add_argument("--foreman", required=True)
+        p_add.add_argument("--inactive", action="store_true")
+
+        p_list = projects_sub.add_parser("list")
+        p_list.add_argument("--all", action="store_true", help="Include inactive projects")
+
+        p_show = projects_sub.add_parser("show")
+        p_show.add_argument("--code", required=True)
+
+        p_del = projects_sub.add_parser("delete")
+        p_del.add_argument("--code", required=True)
+
+        # -------------------------
         # takeoffs (SQLite)
         # -------------------------
         takeoffs = sub.add_parser("takeoffs")
@@ -155,6 +179,11 @@ def main(argv: list[str] | None = None) -> int:
 
         show = takeoffs_sub.add_parser("show")
         show.add_argument("--id", required=True)
+
+        rnd = takeoffs_sub.add_parser("render")
+        rnd.add_argument("--id", required=True)
+        rnd.add_argument("--format", choices=["pdf", "json", "csv"], required=True)
+        rnd.add_argument("--out", required=True)
 
         args = parser.parse_args(argv)
 
@@ -215,6 +244,57 @@ def main(argv: list[str] | None = None) -> int:
 
             print(f"{fmt.value.upper()} generated at: {rendered_path.resolve()}")
             return 0
+
+        # -------------------------
+        # PROJECTS (SQLite)
+        # -------------------------
+        if args.cmd == "projects":
+            conn = SqliteDb(path=Path(args.db_path)).connect()
+            try:
+                project_repo = SqliteProjectRepository(conn=conn)
+
+                if args.projects_cmd == "add":
+                    project_repo.upsert(
+                        Project(
+                            code=args.code,
+                            name=args.name,
+                            contractor=args.contractor,
+                            foreman=args.foreman,
+                            is_active=not args.inactive,
+                        )
+                    )
+                    status = "inactive" if args.inactive else "active"
+                    print(f"PROJECT saved code={args.code} status={status}")
+                    return 0
+
+                if args.projects_cmd == "list":
+                    rows = project_repo.list(include_inactive=bool(args.all))
+                    for p in rows:
+                        active = "active" if p.is_active else "inactive"
+                        print(
+                            f"{p.code} | {p.name} | contractor={p.contractor} | "
+                            f"foreman={p.foreman} | {active}"
+                        )
+                    return 0
+
+                if args.projects_cmd == "show":
+                    p = project_repo.get(code=args.code)
+                    active = "active" if p.is_active else "inactive"
+                    print(
+                        f"{p.code} | {p.name} | contractor={p.contractor} | "
+                        f"foreman={p.foreman} | {active}"
+                    )
+                    return 0
+
+                if args.projects_cmd == "delete":
+                    project_repo.delete(code=args.code)
+                    print(f"PROJECT deleted code={args.code}")
+                    return 0
+
+                raise AssertionError("Unreachable: unknown projects command")
+
+            finally:
+                conn.close()
 
         # -------------------------
         # TAKEOFFS (SQLite)
@@ -281,6 +361,23 @@ def main(argv: list[str] | None = None) -> int:
                             f"{ln.item_code} | qty={ln.qty} | {taxable} | "
                             f"unit_price={ln.unit_price_snapshot} | {ln.description_snapshot}"
                         )
+                    return 0
+
+                if args.takeoffs_cmd == "render":
+                    fmt = OutputFormat(args.format)
+                    out = Path(args.out)
+                    out.parent.mkdir(parents=True, exist_ok=True)
+
+                    rendered_path = RenderTakeoffFromSnapshot(
+                        project_repo=project_repo,
+                        template_repo=template_repo,
+                        takeoff_repo=takeoff_repo,
+                        takeoff_line_repo=takeoff_line_repo,
+                        renderer_factory=RendererRegistry(),
+                        config=config,
+                    )(takeoff_id=args.id, out=out, fmt=fmt)
+
+                    print(f"{fmt.value.upper()} generated at: {rendered_path.resolve()}")
                     return 0
 
                 raise AssertionError("Unreachable: unknown takeoffs command")
