@@ -17,6 +17,8 @@ from app.application.seed_takeoff_from_template import SeedTakeoffFromTemplate
 from app.config import AppConfig
 from app.domain.output_format import OutputFormat
 from app.domain.project import Project
+from app.domain.template import Template
+from app.domain.template_line import TemplateLine
 from app.infrastructure.file_takeoff_repository import FileTakeoffRepository
 from app.infrastructure.renderer_registry import RendererRegistry
 from app.infrastructure.sqlite_db import SqliteDb
@@ -24,8 +26,8 @@ from app.infrastructure.sqlite_item_repository import SqliteItemRepository
 from app.infrastructure.sqlite_project_repository import SqliteProjectRepository
 from app.infrastructure.sqlite_takeoff_line_repository import SqliteTakeoffLineRepository
 from app.infrastructure.sqlite_takeoff_repository import SqliteTakeoffRepository
-from app.infrastructure.sqlite_template_line_repository import SqliteTemplateLineRepository
 from app.infrastructure.sqlite_template_repository import SqliteTemplateRepository
+from app.infrastructure.sqlite_template_line_repository import SqliteTemplateLineRepository
 from app.infrastructure.takeoff_json_loader import TakeoffJsonLoader
 
 # -----------------------------------
@@ -164,6 +166,42 @@ def main(argv: list[str] | None = None) -> int:
         p_del.add_argument("--code", required=True)
 
         # -------------------------
+        # templates (SQLite)
+        # -------------------------
+        templates = sub.add_parser("templates")
+        templates_sub = templates.add_subparsers(dest="templates_cmd", required=True)
+
+        t_add = templates_sub.add_parser("add")
+        t_add.add_argument("--code", required=True)
+        t_add.add_argument("--name", required=True)
+        t_add.add_argument("--category", required=True)
+        t_add.add_argument("--inactive", action="store_true")
+
+        t_list = templates_sub.add_parser("list")
+        t_list.add_argument("--all", action="store_true", help="Include inactive templates")
+
+        t_show = templates_sub.add_parser("show")
+        t_show.add_argument("--code", required=True)
+
+        t_del = templates_sub.add_parser("delete")
+        t_del.add_argument("--code", required=True)
+
+        # -------------------------
+        # template-lines (SQLite)
+        # -------------------------
+        tlines = sub.add_parser("template-lines")
+        tlines_sub = tlines.add_subparsers(dest="tlines_cmd", required=True)
+
+        tl_add = tlines_sub.add_parser("add")
+        tl_add.add_argument("--template", required=True)
+        tl_add.add_argument("--item", required=True)
+        tl_add.add_argument("--qty", required=True)
+        tl_add.add_argument("--notes", default=None)
+
+        tl_list = tlines_sub.add_parser("list")
+        tl_list.add_argument("--template", required=True)
+
+        # -------------------------
         # takeoffs (SQLite)
         # -------------------------
         takeoffs = sub.add_parser("takeoffs")
@@ -292,6 +330,87 @@ def main(argv: list[str] | None = None) -> int:
                     return 0
 
                 raise AssertionError("Unreachable: unknown projects command")
+
+            finally:
+                conn.close()
+
+        # -------------------------
+        # TEMPLATES (SQLite)
+        # -------------------------
+        if args.cmd == "templates":
+            conn = SqliteDb(path=Path(args.db_path)).connect()
+            try:
+                template_repo = SqliteTemplateRepository(conn=conn)
+
+                if args.templates_cmd == "add":
+                    template_repo.upsert(
+                        Template(
+                            code=args.code,
+                            name=args.name,
+                            category=args.category,
+                            is_active=not args.inactive,
+                        )
+                    )
+                    status = "inactive" if args.inactive else "active"
+                    print(f"TEMPLATE saved code={args.code} status={status}")
+                    return 0
+
+                if args.templates_cmd == "list":
+                    rows = template_repo.list(include_inactive=bool(args.all))
+                    for t in rows:
+                        active = "active" if t.is_active else "inactive"
+                        print(f"{t.code} | {t.name} | category={t.category} | {active}")
+                    return 0
+
+                if args.templates_cmd == "show":
+                    t = template_repo.get(code=args.code)
+                    active = "active" if t.is_active else "inactive"
+                    print(f"{t.code} | {t.name} | category={t.category} | {active}")
+                    return 0
+
+                if args.templates_cmd == "delete":
+                    template_repo.delete(code=args.code)
+                    print(f"TEMPLATE deleted code={args.code}")
+                    return 0
+
+                raise AssertionError("Unreachable: unknown templates command")
+
+            finally:
+                conn.close()
+
+        # -------------------------
+        # TEMPLATE LINES (SQLite)
+        # -------------------------
+        if args.cmd == "template-lines":
+            conn = SqliteDb(path=Path(args.db_path)).connect()
+            try:
+                line_repo = SqliteTemplateLineRepository(conn=conn)
+
+                if args.tlines_cmd == "add":
+                    line_repo.upsert(
+                        TemplateLine(
+                            template_code=args.template,
+                            item_code=args.item,
+                            qty=Decimal(args.qty),
+                            notes=args.notes,
+                        )
+                    )
+                    print(
+                        f"TEMPLATE LINE saved template={args.template} "
+                        f"item={args.item} qty={args.qty}"
+                    )
+                    return 0
+
+                if args.tlines_cmd == "list":
+                    rows = line_repo.list_for_template(template_code=args.template)
+                    for ln in rows:
+                        notes = ln.notes or ""
+                        print(
+                            f"{ln.template_code} | {ln.item_code} | qty={ln.qty} | {notes}"
+                        )
+                    return 0
+
+                raise AssertionError("Unreachable: unknown template-lines command")
 
             finally:
                 conn.close()
