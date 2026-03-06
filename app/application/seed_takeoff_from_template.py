@@ -10,6 +10,7 @@ from app.application.repositories.item_repository import ItemRepository
 from app.application.repositories.project_repository import ProjectRepository
 from app.application.repositories.template_line_repository import TemplateLineRepository
 from app.application.repositories.template_repository import TemplateRepository
+from app.domain.stage import Stage
 from app.domain.takeoff_line_snapshot import TakeoffLineSnapshot
 from app.domain.takeoff_record import TakeoffRecord
 
@@ -20,6 +21,7 @@ class TakeoffSnapshotRepository(Protocol):
 
 class TakeoffLineSnapshotRepository(Protocol):
     def bulk_insert(self, lines: list[TakeoffLineSnapshot]) -> None: ...
+
 
 @dataclass(frozen=True)
 class SeedTakeoffFromTemplate:
@@ -43,7 +45,7 @@ class SeedTakeoffFromTemplate:
             raise InvalidInputError("template_code cannot be empty")
 
         # Validate existence (raises InvalidInputError if missing)
-        _ = self.project_repo.get(project_code)
+        project = self.project_repo.get(project_code)
         _ = self.template_repo.get(template_code)
 
         template_lines = self.template_line_repo.list_for_template(template_code)
@@ -58,6 +60,7 @@ class SeedTakeoffFromTemplate:
             project_code=project_code,
             template_code=template_code,
             tax_rate=tax_rate,
+            valve_discount=project.valve_discount,
             created_at="",
         )
 
@@ -65,18 +68,29 @@ class SeedTakeoffFromTemplate:
         for tl in template_lines:
             item = self.item_repo.get(tl.item_code)  # validates existence
 
-            snapshots.append(
-                TakeoffLineSnapshot(
-                    takeoff_id=takeoff_id,
-                    item_code=tl.item_code,
-                    qty=tl.qty,
-                    notes=tl.notes,
-                    description_snapshot=item.description,
-                    details_snapshot=item.details,
-                    unit_price_snapshot=item.unit_price,
-                    taxable_snapshot=item.taxable,
-                )
+            base_kwargs = dict(
+                takeoff_id=takeoff_id,
+                item_code=tl.item_code,
+                qty=tl.qty,
+                notes=tl.notes,
+                description_snapshot=item.description,
+                details_snapshot=item.details,
+                unit_price_snapshot=item.unit_price,
+                taxable_snapshot=item.taxable,
             )
+
+            # TemplateLine v2 fields (stage/factor/sort_order) may not exist in older snapshot models.
+            extra_kwargs = dict(
+                stage=tl.stage if isinstance(tl.stage, Stage) else Stage(str(tl.stage)),
+                factor=tl.factor,
+                sort_order=tl.sort_order,
+            )
+
+            try:
+                snapshots.append(TakeoffLineSnapshot(**base_kwargs, **extra_kwargs))
+            except TypeError:
+                # Backward compatibility during migration: snapshot model without stage/factor/sort_order.
+                snapshots.append(TakeoffLineSnapshot(**base_kwargs))
 
         # Persist atomically
         self.takeoff_repo.create(takeoff)

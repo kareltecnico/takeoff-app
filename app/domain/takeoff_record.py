@@ -10,4 +10,5 @@ class TakeoffRecord:
     project_code: str
     template_code: str
     tax_rate: Decimal
-    created_at: str
+    valve_discount: Decimal = Decimal("0.00")
+    created_at: str = ""

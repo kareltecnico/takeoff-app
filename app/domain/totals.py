@@ -63,7 +63,7 @@ def calc_stage_totals(
 def calc_grand_totals(
     lines: list[TakeoffLineInput],
     *,
-    valve_discount: Decimal = Decimal("-112.99"),
+    valve_discount: Decimal = Decimal("0.00"),
     tax_rate: Decimal = Decimal("0.07"),
 ) -> GrandTotals:
     ground = calc_stage_totals(lines, stage=Stage.GROUND, tax_rate=tax_rate)
@@ -73,6 +73,7 @@ def calc_grand_totals(
     subtotal = q2(ground.subtotal + topout.subtotal + final.subtotal)
     tax = q2(ground.tax + topout.tax + final.tax)
     total = q2(subtotal + tax)
+    # `valve_discount` is a signed adjustment (negative reduces the total).
     total_after_discount = q2(total + valve_discount)
 
     return GrandTotals(

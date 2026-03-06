@@ -20,17 +20,10 @@ from app.reporting.renderer_factory import RendererFactory
 
 @dataclass(frozen=True)
 class RenderTakeoffFromSnapshot:
-    """
-    Application adapter: loads a seeded Takeoff snapshot (SQLite) and renders it using
-    the existing reporting pipeline (PDF/CSV/JSON).
+    """Loads a seeded Takeoff snapshot (SQLite: takeoffs + takeoff_lines)
+    and renders it using the reporting pipeline (PDF/CSV/JSON).
 
-    Current limitation (intentional for this phase):
-      - Snapshot lines do not include Stage/Factor/SortOrder yet.
-      - We render all lines under FINAL stage with factor=1.0 and stable ordering.
-
-    Next iteration:
-      - Extend the snapshot schema to persist stage/factor/sort_order so report layout
-        and stage totals match the original Takeoff model.
+    Snapshot lines persist TemplateLine v2 fields (stage/factor/sort_order).
     """
 
     project_repo: SqliteProjectRepository
@@ -52,7 +45,7 @@ class RenderTakeoffFromSnapshot:
             contractor_name=project.contractor or "",
             model_group_display=f"{template.code} - {template.name}",
             models=(template.code,),
-            stories=2,  # Placeholder until stories/models are persisted in templates/snapshots.
+            stories=2,  # Placeholder until stories/models are persisted.
         )
 
         takeoff_lines: list[TakeoffLine] = []
@@ -67,19 +60,88 @@ class RenderTakeoffFromSnapshot:
                 is_active=True,
             )
 
+            stage = getattr(ln, "stage", None) or Stage.FINAL
+            factor = getattr(ln, "factor", None) or Decimal("1.0")
+            sort_order = getattr(ln, "sort_order", None)
+            if sort_order is None:
+                sort_order = idx
+
             takeoff_lines.append(
                 TakeoffLine(
                     item=item,
-                    stage=Stage.FINAL,           # Placeholder (see docstring).
+                    stage=stage,
                     qty=ln.qty,
-                    factor=Decimal("1.0"),       # Placeholder (see docstring).
-                    sort_order=idx,              # Stable ordering.
+                    factor=factor,
+                    sort_order=int(sort_order),
                 )
             )
 
         takeoff = Takeoff(
             header=header,
-            tax_rate=t.tax_rate,  # Tax rate is fixed in snapshot (auditability).
+            tax_rate=t.tax_rate,
+            lines=tuple(takeoff_lines),
+        )
+
+        renderer = self.renderer_factory.for_format(fmt)
+        use_case = GenerateTakeoffReportOutput(renderer=renderer, config=self.config)
+        return use_case(takeoff, out)
+
+
+@dataclass(frozen=True)
+class RenderTakeoffFromVersion:
+    """Renders an immutable takeoff version (SQLite: takeoff_versions + takeoff_version_lines).
+
+    Reproducible output: do NOT depend on current takeoff/template/project state.
+    """
+
+    project_repo: SqliteProjectRepository
+    template_repo: SqliteTemplateRepository
+    takeoff_repo: SqliteTakeoffRepository
+    renderer_factory: RendererFactory
+    config: AppConfig
+
+    def __call__(self, *, version_id: str, out: Path, fmt: OutputFormat) -> Path:
+        v = self.takeoff_repo.get_version(version_id=version_id)
+
+        # Pinned at snapshot time
+        project = self.project_repo.get(code=v.project_code_snapshot)
+        template = self.template_repo.get(code=v.template_code_snapshot)
+
+        header = TakeoffHeader(
+            project_name=project.name,
+            contractor_name=project.contractor or "",
+            model_group_display=f"{template.code} - {template.name}",
+            models=(template.code,),
+            stories=2,
+        )
+
+        version_lines = self.takeoff_repo.list_version_lines(version_id=version_id)
+
+        takeoff_lines: list[TakeoffLine] = []
+        for ln in version_lines:
+            item = Item(
+                code=ln.item_code,
+                item_number=None,
+                description=ln.description_snapshot,
+                details=ln.details_snapshot,
+                unit_price=ln.unit_price_snapshot,
+                taxable=ln.taxable_snapshot,
+                is_active=True,
+            )
+
+            takeoff_lines.append(
+                TakeoffLine(
+                    item=item,
+                    stage=Stage(ln.stage),
+                    qty=ln.qty,
+                    factor=ln.factor,
+                    sort_order=int(ln.sort_order),
+                )
+            )
+
+        takeoff = Takeoff(
+            header=header,
+            tax_rate=v.tax_rate_snapshot,
             lines=tuple(takeoff_lines),
         )
 

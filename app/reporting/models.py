@@ -4,12 +4,22 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
+from app.domain.totals import GrandTotals
+
+__all__ = [
+    "ReportGrandTotals",
+    "ReportLine",
+    "ReportSection",
+    "TakeoffReport",
+]
+
+# Backwards-compatible public name: older modules import ReportGrandTotals from here.
+ReportGrandTotals = GrandTotals
 
 @dataclass(frozen=True)
 class ReportLine:
     item_number: str
     description: str
-    details: str | None
     unit_price: Decimal
     qty: Decimal
     factor: Decimal
@@ -20,7 +30,10 @@ class ReportLine:
 
 @dataclass(frozen=True)
 class ReportSection:
-    title: str  # "GROUND", "TOPOUT", "FINAL"
+    """
+    A logical section in the report (we map this to a Stage in the domain).
+    """
+    title: str
     lines: tuple[ReportLine, ...]
     subtotal: Decimal
     tax: Decimal
@@ -28,26 +41,14 @@ class ReportSection:
 
 
 @dataclass(frozen=True)
-class ReportGrandTotals:
-    subtotal: Decimal
-    tax: Decimal
-    total: Decimal
-    valve_discount: Decimal
-    total_after_discount: Decimal
-
-
-@dataclass(frozen=True)
 class TakeoffReport:
     company_name: str
-    created_at: datetime
-
     project_name: str
     contractor_name: str
     model_group_display: str
-    stories: int
     models: tuple[str, ...]
-
+    stories: int
+    created_at: datetime
     tax_rate: Decimal
-
     sections: tuple[ReportSection, ...]
     grand_totals: ReportGrandTotals

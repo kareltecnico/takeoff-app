@@ -1,19 +1,17 @@
 from __future__ import annotations
 
 from datetime import datetime
-from decimal import Decimal
 
 from app.domain.stage import Stage
 from app.domain.takeoff import Takeoff
-from app.reporting.models import (
-    ReportGrandTotals,
-    ReportLine,
-    ReportSection,
-    TakeoffReport,
-)
+from app.reporting.models import ReportLine, ReportSection, TakeoffReport
+
+__all__ = ["build_takeoff_report"]
 
 
 def _stage_title(stage: Stage) -> str:
+    # Stable, explicit section titles used by CSV/PDF/JSON.
+    # Tests and customers rely on these exact strings.
     return {
         Stage.GROUND: "GROUND",
         Stage.TOPOUT: "TOPOUT",
@@ -27,24 +25,28 @@ def build_takeoff_report(
     company_name: str = "LEZA'S PLUMBING",
     created_at: datetime | None = None,
 ) -> TakeoffReport:
-    """Build a report DTO from the domain Takeoff (no rendering, just mapping)."""
-    created_at = created_at or datetime.now()
-    header = takeoff.header
+    """
+    Pure translation layer:
+    Domain Takeoff -> Reporting TakeoffReport.
 
+    - Sections map 1:1 to Stage (Ground/Topout/Final)
+    - Lines are sorted by (sort_order, item_number, item_code) via Takeoff.lines_for_stage()
+    - Totals are computed via domain calculation logic (TakeoffLine.totals / Takeoff.stage_totals / Takeoff.grand_totals)
+    """
+    created = created_at or datetime.now()
+
+    stages: tuple[Stage, ...] = (Stage.GROUND, Stage.TOPOUT, Stage.FINAL)
     sections: list[ReportSection] = []
 
-    for stage in (Stage.GROUND, Stage.TOPOUT, Stage.FINAL):
-        stage_lines = list(takeoff.lines_for_stage(stage))
-
+    for st in stages:
         report_lines: list[ReportLine] = []
-        for ln in stage_lines:
+        for ln in takeoff.lines_for_stage(st):
             t = ln.totals(tax_rate=takeoff.tax_rate)
-
+            item_number = ln.item.item_number or ln.item.code
             report_lines.append(
                 ReportLine(
-                    item_number=ln.item.item_number or "",
+                    item_number=item_number,
                     description=ln.item.description,
-                    details=ln.item.details,
                     unit_price=ln.item.unit_price,
                     qty=ln.qty,
                     factor=ln.factor,
@@ -54,41 +56,27 @@ def build_takeoff_report(
                 )
             )
 
-        sub, tax, total = takeoff.stage_totals(stage)
+        subtotal, tax, total = takeoff.stage_totals(st)
 
         sections.append(
             ReportSection(
-                title=_stage_title(stage),
+                title=_stage_title(st),
                 lines=tuple(report_lines),
-                subtotal=sub,
+                subtotal=subtotal,
                 tax=tax,
                 total=total,
             )
         )
 
-    gt = takeoff.grand_totals()
-
-    # Option A (Reports): never allow negative totals in the final displayed report.
-    ZERO = Decimal("0.00")
-    total_after_discount = max(ZERO, gt.total_after_discount)
-
-    grand = ReportGrandTotals(
-        subtotal=gt.subtotal,
-        tax=gt.tax,
-        total=gt.total,
-        valve_discount=gt.valve_discount,
-        total_after_discount=total_after_discount,
-    )
-
     return TakeoffReport(
         company_name=company_name,
-        created_at=created_at,
-        project_name=header.project_name,
-        contractor_name=header.contractor_name,
-        model_group_display=header.model_group_display,
-        stories=header.stories,
-        models=tuple(header.models),
+        project_name=takeoff.header.project_name,
+        contractor_name=takeoff.header.contractor_name,
+        model_group_display=takeoff.header.model_group_display,
+        models=takeoff.header.models,
+        stories=takeoff.header.stories,
+        created_at=created,
         tax_rate=takeoff.tax_rate,
         sections=tuple(sections),
-        grand_totals=grand,
+        grand_totals=takeoff.grand_totals(),
     )

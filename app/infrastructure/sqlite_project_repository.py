@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from decimal import Decimal
 
 from app.application.errors import InvalidInputError
 from app.application.repositories.project_repository import ProjectRepository
@@ -39,14 +40,16 @@ class SqliteProjectRepository(ProjectRepository):
                 project_name,
                 contractor_name,
                 foreman,
+                valve_discount,
                 is_active,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, datetime('now'))
+            VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
             ON CONFLICT(project_code) DO UPDATE SET
                 project_name=excluded.project_name,
                 contractor_name=excluded.contractor_name,
                 foreman=excluded.foreman,
+                valve_discount=excluded.valve_discount,
                 is_active=excluded.is_active,
                 updated_at=datetime('now')
             """,
@@ -55,15 +58,17 @@ class SqliteProjectRepository(ProjectRepository):
                 project.name,
                 project.contractor,
                 project.foreman,
+                str(project.valve_discount),
                 _b(project.is_active),
             ),
         )
         self.conn.commit()
 
     def get(self, code: str) -> Project:
+        
         row = self.conn.execute(
             """
-            SELECT project_code, project_name, contractor_name, foreman, is_active
+            SELECT project_code, project_name, contractor_name, foreman, is_active, valve_discount
             FROM projects
             WHERE project_code = ?
             """,
@@ -79,13 +84,15 @@ class SqliteProjectRepository(ProjectRepository):
             contractor=row["contractor_name"],
             foreman=row["foreman"],
             is_active=_bool(row["is_active"]),
+            valve_discount=Decimal(str(row["valve_discount"])),
         )
 
     def list(self, *, include_inactive: bool = False) -> tuple[Project, ...]:
+        
         if include_inactive:
             rows = self.conn.execute(
                 """
-                SELECT project_code, project_name, contractor_name, foreman, is_active
+                SELECT project_code, project_name, contractor_name, foreman, is_active, valve_discount
                 FROM projects
                 ORDER BY project_code
                 """
@@ -93,7 +100,7 @@ class SqliteProjectRepository(ProjectRepository):
         else:
             rows = self.conn.execute(
                 """
-                SELECT project_code, project_name, contractor_name, foreman, is_active
+                SELECT project_code, project_name, contractor_name, foreman, is_active, valve_discount
                 FROM projects
                 WHERE is_active = 1
                 ORDER BY project_code
@@ -109,9 +116,27 @@ class SqliteProjectRepository(ProjectRepository):
                     contractor=row["contractor_name"],
                     foreman=row["foreman"],
                     is_active=_bool(row["is_active"]),
+                    valve_discount=Decimal(str(row["valve_discount"])),
                 )
             )
         return tuple(out)
+    
+    def set_valve_discount(self, code: str, *, valve_discount: Decimal) -> None:
+        if not str(code).strip():
+            raise InvalidInputError("Project code cannot be empty")
+
+        # Validate existence (and raise clean error if missing)
+        _ = self.get(code=code)
+
+        self.conn.execute(
+            """
+            UPDATE projects
+            SET valve_discount = ?, updated_at = datetime('now')
+            WHERE project_code = ?
+            """,
+            (str(valve_discount), code),
+        )
+        self.conn.commit()
 
     def delete(self, code: str) -> None:
         cur = self.conn.execute(

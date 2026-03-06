@@ -21,13 +21,19 @@ class TakeoffHeader:
 class Takeoff:
     header: TakeoffHeader
     lines: tuple[TakeoffLine, ...]
-    valve_discount: Decimal = Decimal("-112.99")
+    valve_discount: Decimal = Decimal("0.00")
     tax_rate: Decimal = Decimal("0.07")
 
     def lines_for_stage(self, stage: Stage) -> tuple[TakeoffLine, ...]:
         """Lines for a stage, sorted by sort_order (stable PDF layout)."""
         stage_lines = [ln for ln in self.lines if ln.stage == stage]
-        stage_lines.sort(key=lambda ln: ln.sort_order)
+        stage_lines.sort(
+            key=lambda ln: (
+                ln.sort_order,
+                (ln.item.item_number or ""),
+                ln.item.code,
+            )
+        )
         return tuple(stage_lines)
 
     def _as_inputs(self) -> list[TakeoffLineInput]:

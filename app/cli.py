@@ -11,14 +11,19 @@ from app.application.inputs.factory_takeoff_input import FactoryTakeoffInput
 from app.application.inputs.json_takeoff_input import JsonTakeoffInput
 from app.application.inputs.repo_takeoff_input import RepoTakeoffInput
 from app.application.render_takeoff import RenderTakeoff
-from app.application.render_takeoff_from_snapshot import RenderTakeoffFromSnapshot
+from app.application.render_takeoff_from_snapshot import (
+    RenderTakeoffFromSnapshot,
+    RenderTakeoffFromVersion,
+)
 from app.application.save_takeoff import SaveTakeoff
 from app.application.seed_takeoff_from_template import SeedTakeoffFromTemplate
 from app.config import AppConfig
 from app.domain.output_format import OutputFormat
 from app.domain.project import Project
+from app.domain.stage import Stage
 from app.domain.template import Template
 from app.domain.template_line import TemplateLine
+from app.domain.totals import TakeoffLineInput, calc_grand_totals, calc_stage_totals
 from app.infrastructure.file_takeoff_repository import FileTakeoffRepository
 from app.infrastructure.renderer_registry import RendererRegistry
 from app.infrastructure.sqlite_db import SqliteDb
@@ -26,8 +31,8 @@ from app.infrastructure.sqlite_item_repository import SqliteItemRepository
 from app.infrastructure.sqlite_project_repository import SqliteProjectRepository
 from app.infrastructure.sqlite_takeoff_line_repository import SqliteTakeoffLineRepository
 from app.infrastructure.sqlite_takeoff_repository import SqliteTakeoffRepository
-from app.infrastructure.sqlite_template_repository import SqliteTemplateRepository
 from app.infrastructure.sqlite_template_line_repository import SqliteTemplateLineRepository
+from app.infrastructure.sqlite_template_repository import SqliteTemplateRepository
 from app.infrastructure.takeoff_json_loader import TakeoffJsonLoader
 
 # -----------------------------------
@@ -155,12 +160,17 @@ def main(argv: list[str] | None = None) -> int:
         p_add.add_argument("--contractor", required=True)
         p_add.add_argument("--foreman", required=True)
         p_add.add_argument("--inactive", action="store_true")
+        p_add.add_argument("--valve-discount", default="0.00")
 
         p_list = projects_sub.add_parser("list")
         p_list.add_argument("--all", action="store_true", help="Include inactive projects")
 
         p_show = projects_sub.add_parser("show")
         p_show.add_argument("--code", required=True)
+        
+        p_set = projects_sub.add_parser("set-valve-discount")
+        p_set.add_argument("--code", required=True)
+        p_set.add_argument("--amount", required=True)
 
         p_del = projects_sub.add_parser("delete")
         p_del.add_argument("--code", required=True)
@@ -196,6 +206,9 @@ def main(argv: list[str] | None = None) -> int:
         tl_add.add_argument("--template", required=True)
         tl_add.add_argument("--item", required=True)
         tl_add.add_argument("--qty", required=True)
+        tl_add.add_argument("--stage", choices=["ground", "topout", "final"], default="final")
+        tl_add.add_argument("--factor", default="1.0")
+        tl_add.add_argument("--sort-order", default="0")
         tl_add.add_argument("--notes", default=None)
 
         tl_list = tlines_sub.add_parser("list")
@@ -222,6 +235,22 @@ def main(argv: list[str] | None = None) -> int:
         rnd.add_argument("--id", required=True)
         rnd.add_argument("--format", choices=["pdf", "json", "csv"], required=True)
         rnd.add_argument("--out", required=True)
+        
+        snap = takeoffs_sub.add_parser("snapshot")
+        snap.add_argument("--id", required=True)
+        snap.add_argument("--notes", default=None)
+
+        vers = takeoffs_sub.add_parser("versions")
+        vers.add_argument("--id", required=True)
+
+        # Alias: version (singular)
+        ver_alias = takeoffs_sub.add_parser("version")
+        ver_alias.add_argument("--id", required=True)
+
+        rv = takeoffs_sub.add_parser("render-version")
+        rv.add_argument("--version-id", required=True)
+        rv.add_argument("--format", choices=["pdf", "json", "csv"], required=True)
+        rv.add_argument("--out", required=True)
 
         args = parser.parse_args(argv)
 
@@ -299,6 +328,7 @@ def main(argv: list[str] | None = None) -> int:
                             contractor=args.contractor,
                             foreman=args.foreman,
                             is_active=not args.inactive,
+                            valve_discount=_parse_decimal(args.valve_discount, "--valve-discount"),
                         )
                     )
                     status = "inactive" if args.inactive else "active"
@@ -311,7 +341,7 @@ def main(argv: list[str] | None = None) -> int:
                         active = "active" if p.is_active else "inactive"
                         print(
                             f"{p.code} | {p.name} | contractor={p.contractor} | "
-                            f"foreman={p.foreman} | {active}"
+                            f"foreman={p.foreman} | {active} | valve_discount={p.valve_discount}"
                         )
                     return 0
 
@@ -320,8 +350,14 @@ def main(argv: list[str] | None = None) -> int:
                     active = "active" if p.is_active else "inactive"
                     print(
                         f"{p.code} | {p.name} | contractor={p.contractor} | "
-                        f"foreman={p.foreman} | {active}"
+                        f"foreman={p.foreman} | {active} | valve_discount={p.valve_discount}"
                     )
+                    return 0
+                
+                if args.projects_cmd == "set-valve-discount":
+                    amount = _parse_decimal(args.amount, "--amount")
+                    project_repo.set_valve_discount(code=args.code, valve_discount=amount)
+                    print(f"PROJECT policy updated code={args.code} valve_discount={amount}")
                     return 0
 
                 if args.projects_cmd == "delete":
@@ -392,6 +428,9 @@ def main(argv: list[str] | None = None) -> int:
                             template_code=args.template,
                             item_code=args.item,
                             qty=Decimal(args.qty),
+                            stage=Stage(args.stage),
+                            factor=Decimal(args.factor),
+                            sort_order=int(args.sort_order),
                             notes=args.notes,
                         )
                     )
@@ -406,7 +445,8 @@ def main(argv: list[str] | None = None) -> int:
                     for ln in rows:
                         notes = ln.notes or ""
                         print(
-                            f"{ln.template_code} | {ln.item_code} | qty={ln.qty} | {notes}"
+                            f"{ln.template_code} | {ln.item_code} | qty={ln.qty} | "
+                            f"stage={ln.stage.value} | factor={ln.factor} | sort_order={ln.sort_order} | {notes}"
                         )
                     return 0
 
@@ -460,26 +500,68 @@ def main(argv: list[str] | None = None) -> int:
                         print(
                             f"{t.takeoff_id} | project={t.project_code} | "
                             f"template={t.template_code} | "
-                            f"tax_rate={t.tax_rate} | created_at={t.created_at}"
+                            f"tax_rate={t.tax_rate} | created_at={t.created_at} | valve_discount={t.valve_discount}"
                         )
                     return 0
 
                 if args.takeoffs_cmd == "show":
                     t = takeoff_repo.get(takeoff_id=args.id)
                     print(
-                        f"{t.takeoff_id} | project={t.project_code} | "
-                        f"template={t.template_code} | "
-                        f"tax_rate={t.tax_rate} | "
-                        f"created_at={t.created_at}"
+                        f"TAKEOFF {t.takeoff_id} | project={t.project_code} | "
+                        f"template={t.template_code} | tax_rate={t.tax_rate} | "
+                        f"created_at={t.created_at} | valve_discount={t.valve_discount}"
                     )
+
                     print("---- lines ----")
-                    lines = takeoff_line_repo.list_for_takeoff(takeoff_id=args.id)
+                    lines = list(takeoff_line_repo.list_for_takeoff(takeoff_id=args.id))
+
                     for ln in lines:
                         taxable = "taxable" if ln.taxable_snapshot else "non-taxable"
+                        stage = getattr(ln, "stage", None)
+                        stage_txt = stage.value if stage is not None else ""
+                        factor_txt = getattr(ln, "factor", "")
+                        sort_txt = getattr(ln, "sort_order", "")
                         print(
-                            f"{ln.item_code} | qty={ln.qty} | {taxable} | "
+                            f"{ln.item_code} | qty={ln.qty} | stage={stage_txt} | "
+                            f"factor={factor_txt} | sort_order={sort_txt} | {taxable} | "
                             f"unit_price={ln.unit_price_snapshot} | {ln.description_snapshot}"
                         )
+
+                    # ---- totals (debug) ----
+                    print("---- totals ----")
+
+                    inputs: list[TakeoffLineInput] = []
+                    for ln in lines:
+                        st = getattr(ln, "stage", None) or Stage.FINAL
+                        factor = getattr(ln, "factor", None) or Decimal("1.0")
+                        inputs.append(
+                            TakeoffLineInput(
+                                stage=st,
+                                price=ln.unit_price_snapshot,
+                                qty=ln.qty,
+                                factor=factor,
+                                taxable=ln.taxable_snapshot,
+                            )
+                        )
+
+                    for st in (Stage.GROUND, Stage.TOPOUT, Stage.FINAL):
+                        tt = calc_stage_totals(inputs, stage=st, tax_rate=t.tax_rate)
+                        print(
+                            f"{st.value.upper():<6} | subtotal={tt.subtotal:.2f} | "
+                            f"tax={tt.tax:.2f} | total={tt.total:.2f}"
+                        )
+
+                    valve_discount = t.valve_discount
+                    gt = calc_grand_totals(
+                        inputs,
+                        valve_discount=valve_discount,
+                        tax_rate=t.tax_rate,
+                    )
+                    print(
+                        f"GRAND  | subtotal={gt.subtotal:.2f} | tax={gt.tax:.2f} | "
+                        f"total={gt.total:.2f} | valve_discount={gt.valve_discount:.2f} | "
+                        f"after_discount={gt.total_after_discount:.2f}"
+                    )
                     return 0
 
                 if args.takeoffs_cmd == "render":
@@ -495,6 +577,74 @@ def main(argv: list[str] | None = None) -> int:
                         renderer_factory=RendererRegistry(),
                         config=config,
                     )(takeoff_id=args.id, out=out, fmt=fmt)
+
+                    print(f"{fmt.value.upper()} generated at: {rendered_path.resolve()}")
+                    return 0
+                
+                if args.takeoffs_cmd == "snapshot":
+                    version_id = takeoff_repo.create_snapshot_version(
+                        takeoff_id=args.id,
+                        notes=args.notes,
+                    )
+                    v = takeoff_repo.get_version(version_id=version_id)
+                    print(
+                        f"TAKEOFF snapshot created version_id={v.version_id} "
+                        f"takeoff_id={v.takeoff_id} v{v.version_number} created_at={v.created_at}"
+                    )
+
+                    # UX: print next-step commands (copy/paste friendly)
+                    print()
+                    print("NEXT:")
+                    print(f"  python -m app.cli --db-path {args.db_path} takeoffs versions --id {v.takeoff_id}")
+                    print(
+                        "  python -m app.cli --db-path "
+                        f"{args.db_path} takeoffs render-version --version-id {v.version_id} "
+                        "--format pdf --out output/version.pdf"
+                    )
+                    return 0
+
+                if args.takeoffs_cmd in ("versions", "version"):
+                    rows = takeoff_repo.list_versions(takeoff_id=args.id)
+                    if not rows:
+                        print(f"No versions found for takeoff_id={args.id}")
+                        return 0
+                    for v in rows:
+                        notes = v.notes or ""
+                        print(
+                            f"{v.version_id} | takeoff_id={v.takeoff_id} | "
+                            f"v{v.version_number} | tax_rate={v.tax_rate_snapshot} | "
+                            f"valve_discount={v.valve_discount_snapshot} | {v.created_at} | {notes}"
+                        )
+                    return 0
+
+                if args.takeoffs_cmd == "render-version":
+                    fmt = OutputFormat(args.format)
+                    out = Path(args.out)
+                    out.parent.mkdir(parents=True, exist_ok=True)
+
+                    try:
+                        rendered_path = RenderTakeoffFromVersion(
+                            project_repo=project_repo,
+                            template_repo=template_repo,
+                            takeoff_repo=takeoff_repo,
+                            renderer_factory=RendererRegistry(),
+                            config=config,
+                        )(version_id=args.version_id, out=out, fmt=fmt)
+                    except InvalidInputError as e:
+                        # Common UX mistake: user passes takeoff_id instead of version_id
+                        try:
+                            _ = takeoff_repo.get(takeoff_id=args.version_id)
+                        except InvalidInputError:
+                            raise  # original error: truly unknown id
+                        else:
+                            print(str(e))
+                            print()
+                            print("It looks like you passed a TAKEOFF id, but this command needs a VERSION id.")
+                            print("Run this to list versions for that takeoff:")
+                            print(
+                                f"  python -m app.cli --db-path {args.db_path} takeoffs versions --id {args.version_id}"
+                            )
+                            return 2
 
                     print(f"{fmt.value.upper()} generated at: {rendered_path.resolve()}")
                     return 0
