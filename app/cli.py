@@ -231,6 +231,17 @@ def main(argv: list[str] | None = None) -> int:
         show = takeoffs_sub.add_parser("show")
         show.add_argument("--id", required=True)
 
+        lines_cmd = takeoffs_sub.add_parser("lines")
+        lines_cmd.add_argument("--id", required=True)
+
+        upd = takeoffs_sub.add_parser("update-line")
+        upd.add_argument("--id", required=True)
+        upd.add_argument("--item", required=True)
+        upd.add_argument("--qty", required=False)
+        upd.add_argument("--stage", choices=["ground", "topout", "final"], required=False)
+        upd.add_argument("--factor", required=False)
+        upd.add_argument("--sort-order", required=False)
+
         rnd = takeoffs_sub.add_parser("render")
         rnd.add_argument("--id", required=True)
         rnd.add_argument("--format", choices=["pdf", "json", "csv"], required=True)
@@ -482,11 +493,33 @@ def main(argv: list[str] | None = None) -> int:
                         takeoff_line_repo=takeoff_line_repo,
                     )
 
-                    takeoff_id = use_case(
-                        project_code=args.project,
-                        template_code=args.template,
-                        tax_rate_override=tax_rate,
-                    )
+                    try:
+                        takeoff_id = use_case(
+                            project_code=args.project,
+                            template_code=args.template,
+                            tax_rate_override=tax_rate,
+                        )
+                    except InvalidInputError as e:
+                        msg = str(e)
+                        if msg.startswith("Takeoff already exists for project=") and " id=" in msg:
+                            existing_id = msg.rsplit(" id=", 1)[1].strip()
+                            print(msg)
+                            print()
+                            print("NEXT:")
+                            print(
+                                f"  python -m app.cli --db-path {args.db_path} "
+                                f"takeoffs show --id {existing_id}"
+                            )
+                            print(
+                                f"  python -m app.cli --db-path {args.db_path} "
+                                f"takeoffs snapshot --id {existing_id}"
+                            )
+                            print(
+                                f"  python -m app.cli --db-path {args.db_path} "
+                                f"takeoffs render --id {existing_id} --format pdf --out output/takeoff.pdf"
+                            )
+                            return 2
+                        raise
 
                     print(
                         f"TAKEOFF seeded id={takeoff_id} "
@@ -561,6 +594,69 @@ def main(argv: list[str] | None = None) -> int:
                         f"GRAND  | subtotal={gt.subtotal:.2f} | tax={gt.tax:.2f} | "
                         f"total={gt.total:.2f} | valve_discount={gt.valve_discount:.2f} | "
                         f"after_discount={gt.total_after_discount:.2f}"
+                    )
+                    return 0
+
+                if args.takeoffs_cmd == "lines":
+                    lines = list(takeoff_line_repo.list_for_takeoff(takeoff_id=args.id))
+                    if not lines:
+                        print(f"No lines found for takeoff_id={args.id}")
+                        return 0
+
+                    for ln in lines:
+                        taxable = "taxable" if ln.taxable_snapshot else "non-taxable"
+                        stage = getattr(ln, "stage", None)
+                        stage_txt = stage.value if stage is not None else ""
+                        factor_txt = getattr(ln, "factor", "")
+                        sort_txt = getattr(ln, "sort_order", "")
+                        print(
+                            f"{ln.item_code} | qty={ln.qty} | stage={stage_txt} | "
+                            f"factor={factor_txt} | sort_order={sort_txt} | {taxable} | "
+                            f"unit_price={ln.unit_price_snapshot} | {ln.description_snapshot}"
+                        )
+                    return 0
+
+                if args.takeoffs_cmd == "update-line":
+                    qty: Decimal | None = None
+                    factor: Decimal | None = None
+                    stage: Stage | None = None
+                    sort_order: int | None = None
+
+                    if args.qty is not None:
+                        qty = _parse_decimal(args.qty, "--qty")
+                    if args.factor is not None:
+                        factor = _parse_decimal(args.factor, "--factor")
+                    if args.stage is not None:
+                        stage = Stage(args.stage)
+                    if args.sort_order is not None:
+                        try:
+                            sort_order = int(args.sort_order)
+                        except Exception as e:
+                            raise SystemExit(f"Invalid --sort-order: {args.sort_order!r}") from e
+
+                    if qty is None and factor is None and stage is None and sort_order is None:
+                        raise SystemExit(
+                            "At least one of --qty, --stage, --factor, --sort-order must be provided"
+                        )
+
+                    takeoff_line_repo.update_line(
+                        takeoff_id=args.id,
+                        item_code=args.item,
+                        qty=qty,
+                        stage=stage,
+                        factor=factor,
+                        sort_order=sort_order,
+                    )
+                    print(
+                        f"TAKEOFF line updated takeoff_id={args.id} item={args.item}"
+                    )
+                    print()
+                    print("NEXT:")
+                    print(
+                        f"  python -m app.cli --db-path {args.db_path} takeoffs lines --id {args.id}"
+                    )
+                    print(
+                        f"  python -m app.cli --db-path {args.db_path} takeoffs show --id {args.id}"
                     )
                     return 0
 

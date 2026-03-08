@@ -51,6 +51,23 @@ class SeedTakeoffFromTemplate:
         template_lines = self.template_line_repo.list_for_template(template_code)
         if not template_lines:
             raise InvalidInputError(f"Template has no lines: {template_code}")
+        
+        # Prevent duplicate takeoffs for same project + template
+        existing = None
+        try:
+            existing = self.takeoff_repo.find_by_project_template(
+                project_code=project_code,
+                template_code=template_code,
+            )
+        except AttributeError:
+            # repository may not implement helper yet
+            existing = None
+
+        if existing is not None:
+            raise InvalidInputError(
+                f"Takeoff already exists for project={project_code} "
+                f"template={template_code} id={existing.takeoff_id}"
+            )
 
         takeoff_id = str(uuid4())
         tax_rate = tax_rate_override if tax_rate_override is not None else Decimal("0.07")

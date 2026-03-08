@@ -231,6 +231,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
             "ALTER TABLE takeoff_versions ADD COLUMN template_code_snapshot TEXT NOT NULL DEFAULT ''"
         )
 
+    # Enforce one takeoff per (project_code, template_code)
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_takeoffs_project_template
+        ON takeoffs(project_code, template_code)
+        """
+    )    
+    
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS takeoff_version_lines (

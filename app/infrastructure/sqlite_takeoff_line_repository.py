@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from app.application.repositories.takeoff_line_repository import TakeoffLineRepository
+from app.application.errors import InvalidInputError
 from app.domain.stage import Stage
 from app.domain.takeoff_line_snapshot import TakeoffLineSnapshot
 
@@ -75,6 +76,68 @@ class SqliteTakeoffLineRepository(TakeoffLineRepository):
         except Exception:
             self.conn.rollback()
             raise
+    
+    def update_line(
+        self,
+        *,
+        takeoff_id: str,
+        item_code: str,
+        qty: Decimal | None = None,
+        stage: Stage | None = None,
+        factor: Decimal | None = None,
+        sort_order: int | None = None,
+    ) -> None:
+        if not str(takeoff_id).strip():
+            raise InvalidInputError("takeoff_id cannot be empty")
+        if not str(item_code).strip():
+            raise InvalidInputError("item_code cannot be empty")
+
+        row = self.conn.execute(
+            """
+            SELECT qty, stage, factor, sort_order
+            FROM takeoff_lines
+            WHERE takeoff_id = ? AND item_code = ?
+            """,
+            (takeoff_id, item_code),
+        ).fetchone()
+
+        if row is None:
+            raise InvalidInputError(
+                f"Takeoff line not found: takeoff_id={takeoff_id} item_code={item_code}"
+            )
+
+        new_qty = qty if qty is not None else Decimal(str(row["qty"]))
+        new_stage = stage if stage is not None else Stage(str(row["stage"] or "final"))
+        new_factor = factor if factor is not None else Decimal(str(row["factor"] or "1.0"))
+        new_sort_order = sort_order if sort_order is not None else int(row["sort_order"] or 0)
+
+        if new_qty <= Decimal("0"):
+            raise InvalidInputError("qty must be > 0")
+        if new_factor <= Decimal("0"):
+            raise InvalidInputError("factor must be > 0")
+        if new_sort_order < 0:
+            raise InvalidInputError("sort_order must be >= 0")
+
+        self.conn.execute(
+            """
+            UPDATE takeoff_lines
+            SET qty = ?,
+                stage = ?,
+                factor = ?,
+                sort_order = ?,
+                updated_at = datetime('now')
+            WHERE takeoff_id = ? AND item_code = ?
+            """,
+            (
+                str(new_qty),
+                new_stage.value,
+                str(new_factor),
+                int(new_sort_order),
+                takeoff_id,
+                item_code,
+            ),
+        )
+        self.conn.commit()    
 
     def list_for_takeoff(self, takeoff_id: str) -> tuple[TakeoffLineSnapshot, ...]:
         rows = self.conn.execute(

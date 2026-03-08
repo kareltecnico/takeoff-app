@@ -91,6 +91,28 @@ class SqliteTakeoffRepository:
             created_at=str(row["created_at"]),
         )
 
+    def find_by_project_template(self, *, project_code: str, template_code: str) -> TakeoffRecord | None:
+        row = self.conn.execute(
+            """
+            SELECT takeoff_id, project_code, template_code, tax_rate, valve_discount, created_at
+            FROM takeoffs
+            WHERE project_code = ? AND template_code = ?
+            """,
+            (project_code, template_code),
+        ).fetchone()
+
+        if not row:
+            return None
+
+        return TakeoffRecord(
+            takeoff_id=str(row["takeoff_id"]),
+            project_code=str(row["project_code"]),
+            template_code=str(row["template_code"]),
+            tax_rate=Decimal(str(row["tax_rate"])),
+            valve_discount=Decimal(str(row["valve_discount"])),
+            created_at=str(row["created_at"]),
+        )
+    
     def list_for_project(self, project_code: str) -> tuple[TakeoffRecord, ...]:
         rows = self.conn.execute(
             """
