@@ -6,6 +6,7 @@ from pathlib import Path
 
 from app.application.build_sample_takeoff import BuildSampleTakeoff
 from app.application.errors import InvalidInputError
+from app.application.generate_revision_report import GenerateRevisionReport
 from app.application.input_sources import TakeoffInputSource
 from app.application.inputs.factory_takeoff_input import FactoryTakeoffInput
 from app.application.inputs.json_takeoff_input import JsonTakeoffInput
@@ -16,11 +17,17 @@ from app.application.render_takeoff_from_snapshot import (
     RenderTakeoffFromVersion,
 )
 from app.application.save_takeoff import SaveTakeoff
+from app.application.diff_takeoff_versions import DiffTakeoffVersions
 from app.application.seed_takeoff_from_template import SeedTakeoffFromTemplate
+from app.application.add_takeoff_line import AddTakeoffLine
+from app.application.delete_takeoff_line import DeleteTakeoffLine
+from app.application.list_takeoff_lines import ListTakeoffLines
+from app.application.update_takeoff_line import UpdateTakeoffLine
 from app.config import AppConfig
 from app.domain.output_format import OutputFormat
 from app.domain.project import Project
 from app.domain.stage import Stage
+from app.domain.takeoff_line_snapshot import TakeoffLineSnapshot
 from app.domain.template import Template
 from app.domain.template_line import TemplateLine
 from app.domain.totals import TakeoffLineInput, calc_grand_totals, calc_stage_totals
@@ -242,6 +249,19 @@ def main(argv: list[str] | None = None) -> int:
         upd.add_argument("--factor", required=False)
         upd.add_argument("--sort-order", required=False)
 
+        add_ln = takeoffs_sub.add_parser("add-line")
+        add_ln.add_argument("--id", required=True)
+        add_ln.add_argument("--item", required=True)
+        add_ln.add_argument("--qty", required=True)
+        add_ln.add_argument("--stage", choices=["ground", "topout", "final"], default="final")
+        add_ln.add_argument("--factor", default="1.0")
+        add_ln.add_argument("--sort-order", default="0")
+        add_ln.add_argument("--notes", default=None)
+
+        del_ln = takeoffs_sub.add_parser("delete-line")
+        del_ln.add_argument("--id", required=True)
+        del_ln.add_argument("--item", required=True)
+
         rnd = takeoffs_sub.add_parser("render")
         rnd.add_argument("--id", required=True)
         rnd.add_argument("--format", choices=["pdf", "json", "csv"], required=True)
@@ -262,6 +282,22 @@ def main(argv: list[str] | None = None) -> int:
         rv.add_argument("--version-id", required=True)
         rv.add_argument("--format", choices=["pdf", "json", "csv"], required=True)
         rv.add_argument("--out", required=True)
+
+        snap_render = takeoffs_sub.add_parser("snapshot-and-render")
+        snap_render.add_argument("--id", required=True)
+        snap_render.add_argument("--format", choices=["pdf", "json", "csv"], required=True)
+        snap_render.add_argument("--out", required=True)
+        snap_render.add_argument("--notes", default=None)
+
+        diff_cmd = takeoffs_sub.add_parser("diff")
+        diff_cmd.add_argument("--v1", required=True)
+        diff_cmd.add_argument("--v2", required=True)
+        diff_cmd.add_argument("--all", action="store_true", help="Include unchanged lines")
+        
+        rev_report = takeoffs_sub.add_parser("revision-report")
+        rev_report.add_argument("--v1", required=True)
+        rev_report.add_argument("--v2", required=True)
+        rev_report.add_argument("--out", required=False)
 
         args = parser.parse_args(argv)
 
@@ -516,7 +552,7 @@ def main(argv: list[str] | None = None) -> int:
                             )
                             print(
                                 f"  python -m app.cli --db-path {args.db_path} "
-                                f"takeoffs render --id {existing_id} --format pdf --out output/takeoff.pdf"
+                                f"takeoffs render --id {existing_id} --format pdf --out outputs/takeoff.pdf"
                             )
                             return 2
                         raise
@@ -598,7 +634,9 @@ def main(argv: list[str] | None = None) -> int:
                     return 0
 
                 if args.takeoffs_cmd == "lines":
-                    lines = list(takeoff_line_repo.list_for_takeoff(takeoff_id=args.id))
+                    lines = list(
+                        ListTakeoffLines(repo=takeoff_line_repo)(takeoff_id=args.id)
+                    )
                     if not lines:
                         print(f"No lines found for takeoff_id={args.id}")
                         return 0
@@ -634,12 +672,7 @@ def main(argv: list[str] | None = None) -> int:
                         except Exception as e:
                             raise SystemExit(f"Invalid --sort-order: {args.sort_order!r}") from e
 
-                    if qty is None and factor is None and stage is None and sort_order is None:
-                        raise SystemExit(
-                            "At least one of --qty, --stage, --factor, --sort-order must be provided"
-                        )
-
-                    takeoff_line_repo.update_line(
+                    UpdateTakeoffLine(repo=takeoff_line_repo)(
                         takeoff_id=args.id,
                         item_code=args.item,
                         qty=qty,
@@ -647,9 +680,54 @@ def main(argv: list[str] | None = None) -> int:
                         factor=factor,
                         sort_order=sort_order,
                     )
+                    print(f"TAKEOFF line updated takeoff_id={args.id} item={args.item}")
+                    print()
+                    print("NEXT:")
                     print(
-                        f"TAKEOFF line updated takeoff_id={args.id} item={args.item}"
+                        f"  python -m app.cli --db-path {args.db_path} takeoffs lines --id {args.id}"
                     )
+                    print(
+                        f"  python -m app.cli --db-path {args.db_path} takeoffs show --id {args.id}"
+                    )
+                    return 0
+
+                if args.takeoffs_cmd == "add-line":
+                    qty = _parse_decimal(args.qty, "--qty")
+                    factor = _parse_decimal(args.factor, "--factor")
+                    stage = Stage(args.stage)
+                    try:
+                        sort_order = int(args.sort_order)
+                    except Exception as e:
+                        raise SystemExit(f"Invalid --sort-order: {args.sort_order!r}") from e
+
+                    item = item_repo.get(args.item)
+
+                    AddTakeoffLine(repo=takeoff_line_repo)(
+                        takeoff_id=args.id,
+                        item=item,
+                        qty=qty,
+                        stage=stage,
+                        factor=factor,
+                        sort_order=sort_order,
+                        notes=args.notes,
+                    )
+                    print(f"TAKEOFF line added takeoff_id={args.id} item={item.code}")
+                    print()
+                    print("NEXT:")
+                    print(
+                        f"  python -m app.cli --db-path {args.db_path} takeoffs lines --id {args.id}"
+                    )
+                    print(
+                        f"  python -m app.cli --db-path {args.db_path} takeoffs show --id {args.id}"
+                    )
+                    return 0
+
+                if args.takeoffs_cmd == "delete-line":
+                    DeleteTakeoffLine(repo=takeoff_line_repo)(
+                        takeoff_id=args.id,
+                        item_code=args.item,
+                    )
+                    print(f"TAKEOFF line deleted takeoff_id={args.id} item={args.item}")
                     print()
                     print("NEXT:")
                     print(
@@ -695,8 +773,41 @@ def main(argv: list[str] | None = None) -> int:
                     print(
                         "  python -m app.cli --db-path "
                         f"{args.db_path} takeoffs render-version --version-id {v.version_id} "
-                        "--format pdf --out output/version.pdf"
+                        "--format pdf --out outputs/version.pdf"
                     )
+                    return 0
+
+                if args.takeoffs_cmd == "snapshot-and-render":
+                    fmt = OutputFormat(args.format)
+                    out = Path(args.out)
+                    out.parent.mkdir(parents=True, exist_ok=True)
+
+                    # 1. Create snapshot
+                    version_id = takeoff_repo.create_snapshot_version(
+                        takeoff_id=args.id,
+                        notes=args.notes,
+                    )
+
+                    v = takeoff_repo.get_version(version_id=version_id)
+
+                    # 2. Render that immutable version
+                    rendered_path = RenderTakeoffFromVersion(
+                        project_repo=project_repo,
+                        template_repo=template_repo,
+                        takeoff_repo=takeoff_repo,
+                        renderer_factory=RendererRegistry(),
+                        config=config,
+                    )(
+                        version_id=version_id,
+                        out=out,
+                        fmt=fmt,
+                    )
+
+                    print(
+                        f"TAKEOFF snapshot created version_id={v.version_id} "
+                        f"takeoff_id={v.takeoff_id} v{v.version_number} created_at={v.created_at}"
+                    )
+                    print(f"{fmt.value.upper()} generated at: {rendered_path.resolve()}")
                     return 0
 
                 if args.takeoffs_cmd in ("versions", "version"):
@@ -711,6 +822,111 @@ def main(argv: list[str] | None = None) -> int:
                             f"v{v.version_number} | tax_rate={v.tax_rate_snapshot} | "
                             f"valve_discount={v.valve_discount_snapshot} | {v.created_at} | {notes}"
                         )
+                    return 0
+                
+                if args.takeoffs_cmd == "revision-report":
+                    report = GenerateRevisionReport(takeoff_repo=takeoff_repo)(
+                        version_a=args.v1,
+                        version_b=args.v2,
+                    )
+
+                    text = report.to_text()
+
+                    if args.out:
+                        out = Path(args.out)
+                        out.parent.mkdir(parents=True, exist_ok=True)
+                        out.write_text(text, encoding="utf-8")
+                        print(f"REVISION REPORT generated at: {out.resolve()}")
+                    else:
+                        print(text, end="")
+
+                    return 0
+
+                if args.takeoffs_cmd == "diff":
+                    result = DiffTakeoffVersions(takeoff_repo=takeoff_repo)(
+                        version_a=args.v1,
+                        version_b=args.v2,
+                    )
+
+                    visible = result.lines if args.all else tuple(
+                        ln for ln in result.lines if ln.change != "unchanged"
+                    )
+
+                    if not visible:
+                        print(
+                            f"No differences found between version_a={result.version_a} "
+                            f"and version_b={result.version_b}"
+                        )
+                        return 0
+
+                    summary = result.summary()
+                    print(
+                        "SUMMARY | "
+                        f"added={summary['added']} | "
+                        f"removed={summary['removed']} | "
+                        f"modified={summary['modified']} | "
+                        f"unchanged={summary['unchanged']}"
+                    )
+                    print(
+                        "FINANCIAL A | "
+                        f"subtotal={result.financial_a.subtotal:.2f} | "
+                        f"tax={result.financial_a.tax:.2f} | "
+                        f"total={result.financial_a.total:.2f} | "
+                        f"valve_discount={result.financial_a.valve_discount:.2f} | "
+                        f"after_discount={result.financial_a.total_after_discount:.2f}"
+                    )
+                    print(
+                        "FINANCIAL B | "
+                        f"subtotal={result.financial_b.subtotal:.2f} | "
+                        f"tax={result.financial_b.tax:.2f} | "
+                        f"total={result.financial_b.total:.2f} | "
+                        f"valve_discount={result.financial_b.valve_discount:.2f} | "
+                        f"after_discount={result.financial_b.total_after_discount:.2f}"
+                    )
+                    delta = result.financial_delta()
+                    print(
+                        "DELTA      | "
+                        f"subtotal={delta.subtotal:.2f} | "
+                        f"tax={delta.tax:.2f} | "
+                        f"total={delta.total:.2f} | "
+                        f"valve_discount={delta.valve_discount:.2f} | "
+                        f"after_discount={delta.total_after_discount:.2f}"
+                    )
+                    print()
+                    print(f"DIFF version_a={result.version_a} version_b={result.version_b}")
+                    for ln in visible:
+                        if ln.change == "added":
+                            print(
+                                f"{ln.item_code} | added | "
+                                f"qty: - -> {ln.new.qty} | "
+                                f"stage: - -> {ln.new.stage} | "
+                                f"factor: - -> {ln.new.factor} | "
+                                f"unit_price: - -> {ln.new.unit_price}"
+                            )
+                        elif ln.change == "removed":
+                            print(
+                                f"{ln.item_code} | removed | "
+                                f"qty: {ln.old.qty} -> - | "
+                                f"stage: {ln.old.stage} -> - | "
+                                f"factor: {ln.old.factor} -> - | "
+                                f"unit_price: {ln.old.unit_price} -> -"
+                            )
+                        elif ln.change == "modified":
+                            print(
+                                f"{ln.item_code} | modified | "
+                                f"qty: {ln.old.qty} -> {ln.new.qty} | "
+                                f"stage: {ln.old.stage} -> {ln.new.stage} | "
+                                f"factor: {ln.old.factor} -> {ln.new.factor} | "
+                                f"unit_price: {ln.old.unit_price} -> {ln.new.unit_price}"
+                            )
+                        else:
+                            print(
+                                f"{ln.item_code} | unchanged | "
+                                f"qty: {ln.old.qty} -> {ln.new.qty} | "
+                                f"stage: {ln.old.stage} -> {ln.new.stage} | "
+                                f"factor: {ln.old.factor} -> {ln.new.factor} | "
+                                f"unit_price: {ln.old.unit_price} -> {ln.new.unit_price}"
+                            )
                     return 0
 
                 if args.takeoffs_cmd == "render-version":

@@ -62,7 +62,6 @@ class SqliteTakeoffLineRepository(TakeoffLineRepository):
                         ln.details_snapshot,
                         str(ln.unit_price_snapshot),
                         _b(ln.taxable_snapshot),
-                        # stage/factor/sort_order are optional during migration
                         getattr(ln, "stage", None).value
                         if isinstance(getattr(ln, "stage", None), Stage)
                         else getattr(ln, "stage", None),
@@ -76,6 +75,65 @@ class SqliteTakeoffLineRepository(TakeoffLineRepository):
         except Exception:
             self.conn.rollback()
             raise
+
+    def add_line(self, line: TakeoffLineSnapshot) -> None:
+        if not str(line.takeoff_id).strip():
+            raise InvalidInputError("takeoff_id cannot be empty")
+        if not str(line.item_code).strip():
+            raise InvalidInputError("item_code cannot be empty")
+        if line.qty <= Decimal("0"):
+            raise InvalidInputError("qty must be > 0")
+        if line.factor <= Decimal("0"):
+            raise InvalidInputError("factor must be > 0")
+        if line.sort_order < 0:
+            raise InvalidInputError("sort_order must be >= 0")
+
+        existing = self.conn.execute(
+            """
+            SELECT 1
+            FROM takeoff_lines
+            WHERE takeoff_id = ? AND item_code = ?
+            """,
+            (line.takeoff_id, line.item_code),
+        ).fetchone()
+        if existing is not None:
+            raise InvalidInputError(
+                f"Takeoff line already exists: takeoff_id={line.takeoff_id} item_code={line.item_code}"
+            )
+
+        self.conn.execute(
+            """
+            INSERT INTO takeoff_lines (
+                takeoff_id,
+                item_code,
+                qty,
+                notes,
+                description_snapshot,
+                details_snapshot,
+                unit_price_snapshot,
+                taxable_snapshot,
+                stage,
+                factor,
+                sort_order,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            """,
+            (
+                line.takeoff_id,
+                line.item_code,
+                str(line.qty),
+                line.notes,
+                line.description_snapshot,
+                line.details_snapshot,
+                str(line.unit_price_snapshot),
+                _b(line.taxable_snapshot),
+                line.stage.value if isinstance(line.stage, Stage) else str(line.stage or "final"),
+                str(line.factor),
+                int(line.sort_order),
+            ),
+        )
+        self.conn.commit()
     
     def update_line(
         self,
@@ -192,3 +250,23 @@ class SqliteTakeoffLineRepository(TakeoffLineRepository):
                 out.append(TakeoffLineSnapshot(**base_kwargs))
 
         return tuple(out)
+    
+    def delete_line(self, *, takeoff_id: str, item_code: str) -> None:
+        if not str(takeoff_id).strip():
+            raise InvalidInputError("takeoff_id cannot be empty")
+        if not str(item_code).strip():
+            raise InvalidInputError("item_code cannot be empty")
+
+        cur = self.conn.execute(
+            """
+            DELETE FROM takeoff_lines
+            WHERE takeoff_id = ? AND item_code = ?
+            """,
+            (takeoff_id, item_code),
+        )
+        self.conn.commit()
+
+        if cur.rowcount == 0:
+            raise InvalidInputError(
+                f"Takeoff line not found: takeoff_id={takeoff_id} item_code={item_code}"
+            )
