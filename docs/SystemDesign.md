@@ -34,6 +34,9 @@ The system is designed to be:
 
 - Primary user: Karel (creates and maintains take-offs)
 - Reviewer: Eric (reviews proposal numbers before submission)
+- Roles:
+  - `admin`: full create/update/delete and calculation permissions
+  - `read-only`: view-only access to projects, take-offs, versions, and reports
 
 ## 4. System Context
 
@@ -136,6 +139,13 @@ Implementation notes:
   - missing prices
   - PDF generation failures
 - UI should show friendly messages while logs capture full details.
+
+## 10.1 Access Control
+
+- RBAC is enforced at the application boundary (CLI today, API/UI later).
+- A role context is passed using `--role` (`admin` by default).
+- Mutating commands are blocked for `read-only` with explicit denial messages.
+- This design keeps domain logic unchanged and centralizes authorization in one place.
 
 ## 11. Testing Strategy
 

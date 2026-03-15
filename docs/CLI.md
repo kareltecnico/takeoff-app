@@ -33,6 +33,20 @@ Default:
 
 - `data/takeoff.db`
 
+### `--role`
+
+Selects execution role for command authorization:
+
+- `admin` (default): full access
+- `read-only`: blocks mutating commands (create/update/delete/snapshot)
+
+Examples:
+
+```bash
+python -m app.cli --role read-only --db-path data/takeoff.db projects list
+python -m app.cli --role admin --db-path data/takeoff.db projects add --code PROJ-001 --name "Palm" --contractor "Lennar" --foreman "JOE"
+```
+
 ---
 
 ## Items (Catalog)

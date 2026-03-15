@@ -7,7 +7,8 @@ import json
 import re
 
 from app.application.build_sample_takeoff import BuildSampleTakeoff
-from app.application.errors import InvalidInputError
+from app.application.access_control import authorize_command
+from app.application.errors import AccessDeniedError, InvalidInputError
 from app.application.generate_revision_report import GenerateRevisionReport
 from app.application.export_revision_bundle import ExportRevisionBundle
 from app.application.input_sources import TakeoffInputSource
@@ -37,6 +38,7 @@ from app.domain.takeoff_line_snapshot import TakeoffLineSnapshot
 from app.domain.template import Template
 from app.domain.template_line import TemplateLine
 from app.domain.totals import TakeoffLineInput, calc_grand_totals, calc_stage_totals
+from app.domain.user_role import UserRole
 from app.infrastructure.file_takeoff_repository import FileTakeoffRepository
 from app.infrastructure.renderer_registry import RendererRegistry
 from app.infrastructure.sqlite_db import SqliteDb
@@ -1097,6 +1099,7 @@ def main(argv: list[str] | None = None) -> int:
 
         # Global (SQLite)
         parser.add_argument("--db-path", default="data/takeoff.db")
+        parser.add_argument("--role", choices=["admin", "read-only"], default="admin")
 
         sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -1301,6 +1304,16 @@ def main(argv: list[str] | None = None) -> int:
 
         args = parser.parse_args(argv)
 
+        role = UserRole(args.role)
+        subcmd_attr = {
+            "projects": "projects_cmd",
+            "templates": "templates_cmd",
+            "template-lines": "tlines_cmd",
+            "takeoffs": "takeoffs_cmd",
+        }.get(args.cmd)
+        subcmd = getattr(args, subcmd_attr) if subcmd_attr else None
+        authorize_command(role=role, cmd=args.cmd, subcmd=subcmd)
+
         # File repo (existing)
         file_repo = FileTakeoffRepository(base_dir=Path(getattr(args, "repo_dir", "data/takeoffs")))
         company_name = getattr(args, "company_name", None) or AppConfig().company_name
@@ -1389,6 +1402,9 @@ def main(argv: list[str] | None = None) -> int:
 
         raise AssertionError("Unreachable: unknown command")
 
+    except AccessDeniedError as e:
+        print(str(e))
+        return 2
     except InvalidInputError as e:
         print(str(e))
         return 2

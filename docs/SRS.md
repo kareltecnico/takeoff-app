@@ -110,6 +110,12 @@ Take-Off App is an internal tool for Leza’s Plumbing to build, maintain, versi
 - Taxable is controlled per item/line (some material-like lines are NO TAX by agreement)
 - Valve Discount is fixed at -112.99 for now (setting), applied before grand total after discount
 
+### FR-9 Role-Based Access Control (RBAC)
+- The backend must support two roles: `admin` and `read-only`.
+- `admin` can create, edit, delete, and run take-off calculations.
+- `read-only` can view projects, take-offs, and reports but cannot mutate data.
+- For CLI workflows, role must be selected explicitly and mutating commands must be denied for `read-only`.
+
 ## 6. Business Rules (summary)
 See `docs/BusinessRules.md` for detailed rules.
 
