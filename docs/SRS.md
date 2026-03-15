@@ -1,129 +1,371 @@
 # Software Requirements Specification (SRS) — Take-Off App
 
 ## 1. Purpose
-Take-Off App is an internal tool for Leza’s Plumbing to build, maintain, version, and generate Take-Off PDFs used to:
-- submit proposals to Lennar,
-- invoice by construction stage (Ground / TopOut / Final),
-- audit payments and resolve discrepancies,
-- quickly identify which fixtures/materials a given Project + Model uses.
 
-## 2. Scope
+Take-Off App is an internal tool for **Leza’s Plumbing** used to create, manage, version, and generate plumbing take‑off documents used for:
 
-### In Scope (MVP v1)
-- Project management (create/edit, status in-course/closed)
-- Item Catalog management (create/edit/delete)
-- Model templates (save and reuse model setups)
-- Model group templates (reuse common groups of models)
-- Take-Off creation/editing for Project + Model Group
-- Auto-generation of standard lines by stage based on business rules
-- Manual overrides: add/remove/edit items and pricing
-- Version snapshots (V1/V2/V3...) as immutable records; maintain a CURRENT working take-off
-- PDF generation on demand with current company format
-- Tax: fixed 7% rate, but taxable is per item/line (some items are NO TAX by agreement)
-- Always apply Valve Discount (-112.99) before Grand Total
+- Preparing proposals for Lennar
+- Calculating quantities by construction stage
+- Supporting billing workflows
+- Auditing historical take‑offs
+- Reducing manual take‑off preparation time
 
-### Out of Scope (v2+)
-- Upgrade automation (delta billing by area: Kitchen/Master/Secondary/Powder)
-- Automatic diff view between versions (optional later)
-- AI extraction from plan documents
+The system converts **plan readings from architectural drawings** into structured take‑off documents through a deterministic pipeline of domain rules.
 
-## 3. Definitions
-- **Project**: a community/job for a contractor (usually Lennar).
-- **Model**: house/townhome/villa/condo model identifier (numbers/letters).
-- **Model Group**: one take-off may cover multiple models if they are identical in items + quantities.
-- **Stages**:
-  - Ground
-  - TopOut
-  - Final
-- **CURRENT**: editable take-off for active work.
-- **Version**: immutable snapshot (V1, V2, V3...) created to preserve history.
+---
 
-## 4. Stakeholders
-- Primary user: Karel (creates and maintains take-offs; uses them for invoicing and audits)
-- Reviewer: Eric (validates proposal numbers before submission)
-- External: Lennar (receives proposals; assigns item numbers; may request changes)
+# 2. System Scope
 
-## 5. Functional Requirements
+## 2.1 In Scope (MVP)
 
-### FR-1 Projects
-- Create project with:
-  - project_name (required)
-  - contractor_name (default: Lennar)
-  - status (in_course/closed)
-- Edit project fields
-- List projects and open a project context for take-off creation
+The first version of the system will support:
 
-### FR-2 Item Catalog
-- CRUD item catalog entries with:
-  - internal_item_code (unique, required)
-  - lennar_item_number (optional)
-  - description1 (required)
-  - description2 (optional)
-  - unit (EA/LF/etc.)
-  - item_type (material/service)
-  - default_taxable (bool)
-- Items must be usable in templates and take-offs
-- Allow price edits (price is stored per takeoff line / template line, not globally fixed)
+• Project creation and management  
+• Item catalog management  
+• Model templates  
+• Model group templates  
+• Creation of editable CURRENT take‑offs  
+• Automatic generation of take‑off lines based on domain rules  
+• Manual adjustments to quantities and pricing  
+• Immutable version snapshots (V1, V2, V3…)  
+• PDF generation matching current company format  
+• Tax handling (7%) with per‑item taxable flags  
+• Valve Discount adjustment  
 
-### FR-3 Templates (Model + Model Group)
-- Create a model template (e.g., “1331”)
-- Store default counts and default stage lines (including sort order)
-- Load a model template into a take-off
-- Create model group templates (sets of models commonly used together)
-- Manage templates (rename, delete, avoid duplicates)
+## 2.2 Out of Scope (Future Versions)
 
-### FR-4 Take-Off (CURRENT)
-- Create CURRENT take-off for project + model group
-- Store:
-  - model_group_display (string)
-  - models list (JSON) for searching by individual model
-  - stories (1–4)
-  - counts (fixture_count float allowed, distances, etc.)
-- Auto-generate standard stage lines
-- Allow manual adjustments:
-  - add new lines for special projects
-  - edit qty, price, taxable flag, item numbers, descriptions
-  - remove lines (with warning)
+These features are intentionally deferred:
 
-### FR-5 Versioning
-- Create immutable snapshot versions: V1, V2, V3...
-- Versions store all line details denormalized (prices never change)
-- CURRENT remains editable and does not show “CURRENT” in filename when exported
-- PDF generation is on-demand (not required on every save)
+• Automated upgrade delta calculations  
+• AI extraction of fixtures from architectural drawings  
+• Visual comparison between take‑off versions  
+• Integration with external accounting systems  
 
-### FR-6 PDF Generation
-- Generate PDF with:
-  - company title and Created at date
-  - table layout close to existing format
-  - fixed ordering of lines per stage
-  - stage totals (subtotal, tax, stage total)
-  - grand totals and Valve Discount (-112.99) before Grand Total After Discount
-- Remove the “%Tax” column (tax is fixed 7%); keep tax amount column
+---
 
-### FR-7 Water Heater Logic
-- Support Tankless and Tank water heaters
-- Auto-select correct install item based on heater type
-- If multiple heaters, installation qty matches heater qty
+# 3. Definitions
 
-### FR-8 Tax & Discount Rules
-- TAX_RATE is fixed 7% (setting)
-- Taxable is controlled per item/line (some material-like lines are NO TAX by agreement)
-- Valve Discount is fixed at -112.99 for now (setting), applied before grand total after discount
+**Project**  
+A construction community or job managed by a contractor (typically Lennar).
 
-## 6. Business Rules (summary)
-See `docs/BusinessRules.md` for detailed rules.
+**Model**  
+A specific home design (e.g. 1333, 1455, etc.).
 
-## 7. Non-Functional Requirements
-- Local-first: works offline
-- Reliability: no data loss; versions immutable
-- Auditability: created_at and notes on versions
-- Maintainability: typed Python, clear module boundaries, tests
-- Performance: PDF generation within seconds
+**Model Group**  
+A set of models that share identical plumbing quantities and can use a single take‑off.
 
-## 8. Acceptance Criteria (MVP)
-- Can create a project + take-off and generate a PDF matching the current structure and totals (within rounding conventions).
-- Can save V1, continue editing CURRENT, save V2, and regenerate PDFs.
-- Can change item prices in CURRENT and see totals update; older versions remain unchanged.
-- Tax is calculated only on taxable lines; NO TAX lines remain untaxed even if they are “materials by name.”
-- Valve Discount is applied consistently and visible in totals.
-- Can search for a model inside a grouped take-off.
+**Stages**
+
+• Ground  
+• TopOut  
+• Final
+
+These stages correspond to Lennar’s construction phases and billing schedule.
+
+**CURRENT**  
+Editable working version of a take‑off.
+
+**Snapshot Version**  
+Immutable historical record of a take‑off (V1, V2, V3...).
+
+---
+
+# 4. Stakeholders
+
+Primary User  
+Karel — creates and maintains take‑offs.
+
+Internal Reviewer  
+Eric — validates pricing before proposal submission.
+
+External Partner  
+Lennar — receives proposals and may request revisions.
+
+---
+
+# 5. System Architecture Overview
+
+The system follows a **domain pipeline architecture**.
+
+```
+PlanReadingInput
+        ↓
+DerivedQuantities
+        ↓
+TemplateFixtureMapping
+        ↓
+ProjectFixtureOverride (optional)
+        ↓
+TakeoffLines
+        ↓
+PDF Rendering
+```
+
+Each layer has a single responsibility and isolates business logic from presentation.
+
+---
+
+# 6. Functional Requirements
+
+## FR‑1 Project Management
+
+The system shall allow users to:
+
+• Create projects  
+• Edit project details  
+• Mark projects as In‑Course or Closed  
+• Prevent modifications when a project is Closed
+
+Project fields include:
+
+• project_name  
+• contractor_name (default Lennar)  
+• status (in_course / closed)
+
+---
+
+## FR‑2 Item Catalog
+
+The system shall maintain a catalog of plumbing items.
+
+Each catalog item includes:
+
+• internal_item_code (unique identifier)  
+• lennar_item_number (optional)  
+• description1  
+• description2 (optional)  
+• unit (EA, LF, etc.)  
+• item_type (material or service)  
+• default_taxable flag
+
+Prices are **not stored globally** and are assigned per take‑off line.
+
+---
+
+## FR‑3 Templates
+
+Templates provide reusable plumbing configurations.
+
+Supported template types:
+
+• TH (Townhome)  
+• Villa  
+• SF (Single Family)
+
+Templates define:
+
+• default hose bib quantities  
+• default sewer / water distances  
+• standard fixture assumptions
+
+Templates accelerate take‑off generation and reduce repetitive configuration.
+
+---
+
+## FR‑4 Take‑Off Creation
+
+Users can create a **CURRENT take‑off** for a project and model group.
+
+Stored data includes:
+
+• model_group_display  
+• list of models  
+• story count  
+• fixture counts  
+• pipe distances
+
+The system shall automatically generate stage line items.
+
+Users may manually:
+
+• add custom lines  
+• adjust quantities  
+• adjust pricing  
+• remove lines
+
+---
+
+## FR‑5 Versioning
+
+Take‑offs support immutable version snapshots.
+
+Editable working version:
+
+CURRENT
+
+Immutable snapshots:
+
+• V1  
+• V2  
+• V3
+
+Snapshots preserve historical pricing and quantities for auditing.
+
+---
+
+## FR‑6 PDF Generation
+
+The system shall generate a PDF representation of a take‑off including:
+
+• company title  
+• creation date  
+• stage tables  
+• stage totals  
+• tax calculations  
+• Valve Discount  
+• final grand total
+
+The PDF format must match the company’s current proposal format.
+
+---
+
+## FR‑7 Tax Handling
+
+Tax rules:
+
+• Tax rate is fixed at **7%**  
+• Each item has a taxable flag  
+• Items marked "NO TAX by agreement" must never generate tax
+
+---
+
+## FR‑8 Valve Discount
+
+Every take‑off includes a fixed adjustment:
+
+Valve Discount = **‑112.99**
+
+Rules:
+
+• Applied after stage totals  
+• Applied before final grand total
+
+---
+
+## FR‑9 Plan Reading Input Schema
+
+The system shall support a structured model representing quantities read directly from construction plans.
+
+Example inputs:
+
+• stories  
+• kitchens  
+• laundry_rooms  
+• lav_faucets  
+• toilets  
+• showers  
+• bathtubs  
+• half_baths  
+• double_bowl_vanities  
+• hose_bibbs  
+• ice_makers  
+• garbage_disposals  
+• water_heater_tank_qty  
+• water_heater_tankless_qty  
+• sewer_distance_lf  
+• water_distance_lf
+
+This layer represents **raw observations from plans**, before applying business rules.
+
+---
+
+## FR‑10 Derived Quantities
+
+Derived quantities are calculated using domain rules.
+
+Examples include:
+
+• water_points  
+• shower_trim_qty  
+• tub_shower_trim_qty  
+• pedestal_qty  
+• install_ice_maker_qty  
+• install_garbage_disposal_qty  
+• install_tank_water_heater_qty  
+• install_tankless_water_heater_qty
+
+Example formula:
+
+```
+water_points =
+  lav_faucets
++ toilets
++ showers
++ bathtubs
++ kitchens
++ laundry_rooms
+- (double_bowl_vanities * 2)
+```
+
+---
+
+## FR‑11 Default Fixture Mapping Schema
+
+Derived quantities must be converted into **catalog items** using a mapping layer.
+
+The mapping occurs in two steps.
+
+### Template Mapping
+
+Default fixture selections are defined by template:
+
+• TH template  
+• Villa template  
+• SF template
+
+Example mapping:
+
+```
+lav_faucets → Lav Faucet 4925
+kitchen_faucet → Kitchen Faucet 7585
+toilets → PF1501WH
+```
+
+### Project Override
+
+Projects may override template mappings if Lennar changes fixtures.
+
+Example:
+
+```
+Default: Lav Faucet 4925
+Project override: Lav Faucet 5090
+```
+
+---
+
+# 7. Non‑Functional Requirements
+
+The system must satisfy:
+
+Reliability  
+No data loss; snapshots immutable.
+
+Maintainability  
+Clear Python modules and domain separation.
+
+Auditability  
+All versions retain creation timestamps.
+
+Performance  
+PDF generation must complete within seconds.
+
+Offline capability  
+The system must run without internet access.
+
+---
+
+# 8. Acceptance Criteria
+
+The system is considered operational when:
+
+• Users can create a project and generate a take‑off  
+• The take‑off produces a correct PDF proposal  
+• Snapshot versions preserve historical data  
+• Tax rules and valve discount apply correctly  
+• Manual adjustments are supported  
+• Fixture counts from plans correctly generate take‑off quantities
+
+---
+
+# End of SRS

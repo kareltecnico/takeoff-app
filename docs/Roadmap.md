@@ -36,3 +36,26 @@ Goal: reduce manual work when item prices change.
 - Upload plumbing plan PDFs
 - Extract fixture counts, tubs, etc. using AI
 - Human review and corrections before generating take-off
+
+## Future — Access Control (Role-based)
+Goal: prevent accidental edits while allowing operational visibility.
+
+Planned roles:
+
+Editor / Admin
+- Create projects
+- Modify templates
+- Create and edit take-offs
+- Create snapshots
+- Export revision bundles
+
+Viewer / Read‑only
+- Inspect projects
+- View take-offs
+- View snapshots
+- Export reports
+
+Notes:
+- Intended for small team usage (owner + management + purchasing).
+- Helps prevent accidental modification of production data.
+- Authentication mechanism TBD (local users or simple credentials).

@@ -1,116 +1,316 @@
 # Business Rules — Take-Off App
 
-## 1. Stages
-Stages are always:
-- Ground
-- TopOut
-- Final
+This document defines the **business rules used to generate plumbing take-offs**.
+These rules are independent from UI, database, or rendering logic.
 
-## 2. Line Calculations
+---
 
-### 2.1 Line Subtotal (pre-tax)
-line_subtotal = price * qty * factor
+# 1. Construction Stages
 
-### 2.2 Tax Amount
-tax_amount = line_subtotal * TAX_RATE if taxable else 0
+All take-off items belong to one of three construction stages.
 
-Where:
-- TAX_RATE = 0.07 (fixed)
+Stages:
 
-### 2.3 Line Total (with tax)
-line_total = line_subtotal + tax_amount
+• Ground  
+• TopOut  
+• Final
 
-## 3. Stage Totals
-For each stage:
-- stage_subtotal = sum(line_subtotal)
-- stage_tax = sum(tax_amount)
-- stage_total = stage_subtotal + stage_tax
+These stages match Lennar’s construction and billing workflow.
 
-## 4. Grand Totals
-Across all stages:
-- grand_subtotal = sum(stage_subtotal)
-- grand_tax = sum(stage_tax)
-- grand_total = grand_subtotal + grand_tax
+---
 
-## 5. Valve Discount
-Valve Discount is applied before final grand total:
-- valve_discount = -112.99 (setting)
-- grand_total_after_discount = grand_total + valve_discount
+# 2. Split Item Factors
 
-## 6. Factors (Split Payments)
-Factor meanings:
-- 0.30 = 30%
-- 0.40 = 40%
-- 1.00 = 100%
+Some items are distributed across stages using fixed factors.
 
-## 7. Absolute Split Items (30/30/40)
-These items are always split across stages:
-- MAT’L PER FIXTURE-*
-- LABOR PER FIXTURE-*
-- DBL-BOWL VANITY-*
+Applicable items:
+
+• MAT'L PER FIXTURE  
+• LABOR PER FIXTURE  
+• DBL-BOWL VANITY
+
+Stage distribution:
+
+| Stage | Factor |
+|------|-------|
+| Ground | 0.30 |
+| TopOut | 0.30 |
+| Final | 0.40 |
+
+Example:
+
+If MAT'L PER FIXTURE = 20
+
+Ground  = 20 × 0.30  
+TopOut  = 20 × 0.30  
+Final   = 20 × 0.40
+
+---
+
+# 3. Stage-Specific Items
+
+Some items belong strictly to one stage.
+
+## Ground-only
+
+• Sewer line material  
+• Sewer line labor  
+• Water supply material  
+• Water supply labor  
+• Plumbing permit
+
+## TopOut-only
+
+• Hose bibb installation  
+• SUPPLY & INSTALL ICE MAKER  
+• Bathtub installation
+
+## Final-only
+
+• Dishwasher install  
+• Garbage disposal install  
+• Water heater install  
+• Finish plumbing fixtures
+
+---
+
+# 4. Water Heater Rules
+
+A house uses **only one heater family** at a time.
+
+Types:
+
+• Tank water heater  
+• Tankless water heater
 
 Rules:
-- Ground factor = 0.30
-- TopOut factor = 0.30
-- Final factor = 0.40
 
-## 8. Stage-only Items
+• A tank heater produces **Install Tank Water Heater = same quantity**  
+• A tankless heater produces **Install Tankless Water Heater = same quantity**
 
-### 8.1 Ground-only (100%)
-These are charged only in Ground (factor = 1.00):
-- MATERIAL FOR SEWER WASTE PIPE
-- MATERIAL FOR WATER SUPPLY LINE
-- LABOR FOR SEWER WASTE PIPE
-- LABOR FOR WATER SUPPLY LINE
-- PLUMBING PERMIT
+Large single-family homes may contain **multiple tankless heaters**.
 
-Notes:
-- Permit may start at 0 or $1 until approved, then updated.
-- Taxable flags for these items are controlled per item; some are NO TAX by agreement.
+Example:
 
-### 8.2 TopOut-only (100%)
-Charged only in TopOut:
-- SUPPLY & INSTALL ICE MAKER
-- HOSE BIBB INSTALLED
-- Bathtub items (e.g., TUB, ALCOVE, VIK)
-- Other special items if negotiated
+Tankless heaters:
+- Rheem 18
+- Rheem 13
 
-### 8.3 Final-only
-Final includes:
-- Install services:
-  - INSTALL DISHWASHER
-  - INSTALL WATER HEATER (Tank)
-  - INSTALL TANKLESS WATER HEATER (Tankless)
-  - INSTALL GARBAGE DISPOSAL
-- Finish fixtures/materials:
-  - toilets, faucets, trims, water heaters, disposals, pedestals, etc.
-- Special projects may add more items (negotiated)
+Install Tankless Water Heater = 2
 
-## 9. Fixture Count Rules
-- Each “water outlet point” from the plan counts 1:1 as a fixture point.
-- Fixture count may be fractional (e.g., +0.5) due to negotiated special agreements.
-- Fixture count drives both MAT’L PER FIXTURE and LABOR PER FIXTURE quantities.
+---
 
-## 10. DBL-BOWL VANITY Rules
-- DBL-BOWL VANITY quantity equals the number of bathrooms with double sinks.
-- Each double-vanity bathroom counts as 1 (even if it has 2 sinks).
-- If present, it appears in all stages with the 30/30/40 split.
+# 5. Double Bowl Vanity Rule
 
-## 11. Model Grouping
-Models can be grouped into a single take-off only if:
-- the item list and quantities are identical (exact match).
+A double vanity bathroom is represented using a special item.
 
-## 12. Tax Rules
-- Tax rate is fixed 7%.
-- Taxability is controlled per item/line; some material-like lines are NO TAX by agreement.
-- Services are generally not taxed, but the system must rely on explicit taxable flags, not assumptions.
+Example:
 
-## 13. Water Heater Install Logic
-- If heater_type = tankless, use INSTALL TANKLESS WATER HEATER.
-- If heater_type = tank, use INSTALL WATER HEATER.
-- Installation qty must match heater qty (e.g., 2 heaters => install qty 2).
+1 double vanity bathroom:
 
-## 14. Versioning Rules
-- CURRENT is editable.
-- Versions (V1/V2/...) are immutable snapshots.
-- Price and taxable flags are frozen in versions even if the item catalog changes later.
+dbl_bowl = 1  
+lav_faucets = 2  
+
+2 double vanity bathrooms:
+
+dbl_bowl = 2  
+lav_faucets = 4  
+
+Important:
+
+Double bowl vanities **do not count as normal water outlet points**.
+They are billed as a grouped item, but the real lavatory faucet count from the plan remains unchanged.
+
+---
+
+# 6. Water Point Calculation
+
+Water points represent fixture outlets used for fixture-based pricing.
+
+Formula:
+
+```
+water_points =
+    lav_faucets
+  + toilets
+  + shower_trim_qty
+  + tub_shower_trim_qty
+  + kitchens
+  + laundry_rooms
+  - (double_bowl_vanities * 2)
+```
+
+Explanation:
+
+• A double vanity contains two lav faucets but is billed as a grouped item  
+• Therefore two outlets must be removed from the water-point formula
+
+---
+
+# 7. Hose Bibb Defaults
+
+Default hose bib quantities:
+
+• Townhomes (TH): 2  
+• Villas: 2  
+• Single Family (SF): 2  
+
+Large SF homes may contain **3 hose bibbs** depending on plan design.
+
+---
+
+# 8. Sewer and Water Distance Defaults
+
+Template defaults:
+
+| Property Type | Default Distance |
+|---------------|-----------------|
+| TH | 25 ft |
+| Villa | 25 ft |
+| SF | 40 ft |
+
+Actual values may change per project.
+
+---
+
+# 9. Fixture Counts From Plans
+
+Typical fixture counts extracted from plans include:
+
+• Kitchen faucets  
+• Lavatory faucets  
+• Toilets  
+• Shower trim  
+• Tub & shower trim  
+• Laundry room  
+• Hose bibbs  
+• Ice makers  
+• Bathtubs  
+
+These counts are used to derive take-off quantities.
+
+---
+
+# 10. Tax Rules
+
+Tax rate is fixed:
+
+Tax = **7%**
+
+Each item has a **taxable flag**.
+
+Some items are marked:
+
+**NO TAX by agreement**
+
+In these cases tax must not be applied.
+
+---
+
+# 11. Valve Discount
+
+Every take-off includes a fixed adjustment:
+
+Valve Discount = **-112.99**
+
+Rules:
+
+• Applied **after stage totals**  
+• Applied **before final grand total**
+
+---
+
+# 12. Versioning Rules
+
+Take-offs support version snapshots.
+
+Editable version:
+
+CURRENT
+
+Immutable versions:
+
+V1  
+V2  
+V3  
+...
+
+Snapshots represent historical records and **must never be modified**.
+
+---
+
+# 13. Project Closure
+
+When a project is marked **Closed**:
+
+• No new take-offs may be created  
+• Existing take-offs cannot be modified  
+• Snapshots remain readable for auditing
+
+---
+
+# 14. Templates
+
+Templates provide default take-off configurations.
+
+Examples:
+
+• TH template  
+• Villa template  
+• SF template
+
+Rules:
+
+• Templates may be edited at any time  
+• Existing project take-offs remain independent once generated
+
+---
+
+# 15. Plan Reading Input Rules
+
+The system distinguishes between:
+
+• **Plan Reading Inputs**: values read directly from construction plans  
+• **Derived Quantities**: values calculated from those readings using business rules  
+• **Takeoff Lines**: final line items generated after fixture mapping
+
+### 15.1 Plan Reading Inputs
+
+Typical plan-reading inputs include:
+
+• stories  
+• kitchens  
+• laundry_rooms  
+• lav_faucets  
+• toilets  
+• showers  
+• bathtubs  
+• half_baths  
+• double_bowl_vanities  
+• hose_bibbs  
+• ice_makers  
+• water_heater_tank_qty  
+• water_heater_tankless_qty  
+• sewer_distance_lf  
+• water_distance_lf
+
+### 15.2 Derived Quantities Model
+
+The following quantities are derived from plan readings:
+
+• `water_points = lav_faucets + toilets + shower_trim_qty + tub_shower_trim_qty + kitchens + laundry_rooms - (double_bowl_vanities * 2)`  
+• `shower_trim_qty = showers`  
+• `tub_shower_trim_qty = bathtubs`  
+• `pedestal_qty = half_baths`  
+• `install_ice_maker_qty = ice_makers`  
+• `install_garbage_disposal_qty = garbage_disposal_qty`  
+• `install_tank_water_heater_qty = water_heater_tank_qty`  
+• `install_tankless_water_heater_qty = water_heater_tankless_qty`
+
+### 15.3 Separation of Concerns
+
+The intended flow is:
+
+`PlanReadingInput -> DerivedQuantities -> FixtureMapping -> TakeoffLines`
+
+This separation reduces manual errors, supports automation, and preserves traceability.

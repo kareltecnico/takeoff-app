@@ -122,3 +122,46 @@ Forbidden:
 3. ResolveTakeoff
 4. SaveTakeoff (repository)
 5. File stored locally
+
+---
+
+# Post‑MVP Extensions (CLI Workflows)
+
+The system has evolved with additional CLI-driven workflows built on top of the existing architecture. These **do not change the architecture rules** defined above; they reuse the same layers.
+
+New application use-cases include:
+
+- `InspectTakeoff`
+- `SummarizeProject`
+- `GenerateProjectInvoice`
+- `ExportRevisionBundle`
+
+These follow the same pattern:
+
+CLI → Application Use Case → Domain / Repository → Reporting → Renderer
+
+The goal of these commands is operational tooling rather than core domain changes.
+
+Examples of workflows:
+
+- Project summaries (inspection and auditing)
+- Snapshot bundle export
+- Project invoice summary
+- Operational diagnostics for takeoffs
+
+All workflows still respect the dependency rules defined earlier in this document.
+# Future Extension — Structured Input Modeling
+
+A future extension of the system will introduce a structured input model for plan reading.
+
+Conceptually:
+
+- `PlanReadingInput` will capture quantities observed from plans
+- derived business-rule calculations will transform those values into take-off quantities
+- a fixture mapping layer will map those quantities to default catalog items
+
+This future capability will still respect the current architecture:
+
+CLI / UI -> Application Use Case -> Domain Rules -> Repository / Reporting / Renderer
+
+The structured input model is intended to reduce repetitive manual work, not to replace the current take-off editing workflow.

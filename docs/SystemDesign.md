@@ -1,208 +1,237 @@
-# System Design — Take-Off App (Python)
+# SystemDesign.md
 
-## 1. Overview
+## 1. System Overview
 
-Take-Off App is an internal application for Leza’s Plumbing to produce Take-Off PDFs used for:
-- Submitting proposals to Lennar
-- Billing by construction stage (Ground, TopOut, Final)
-- Auditing payments against Lennar breakdowns
-- Quickly identifying which fixtures/materials a specific Project + Model uses
+The TakeOff App is a CLI-driven backend system designed to generate, manage, version, and export plumbing takeoffs per **project model**.
 
-The system is designed to be:
-- Local-first (works without internet)
-- Simple to operate for a small business
-- Easy to extend (pricing policies, upgrades, AI extraction later)
+The system focuses on:
 
-## 2. Goals
+• Deterministic takeoff generation  
+• Versioned snapshot storage  
+• Reproducible exports (PDF / CSV / JSON / financial summary)  
+• Clear separation between **plan reading**, **business rules**, and **rendering**
 
-### MVP (v1)
-- Manage Projects
-- Manage Item Catalog (create/edit/delete)
-- Manage Templates (model templates + model group templates)
-- Create/edit Take-Offs (CURRENT)
-- Save version snapshots (V1, V2, V3...) as immutable records
-- Generate Take-Off PDF matching the current company format
-- Support fixed tax rate (7%) with per-item taxable flag (including “NO TAX by agreement” items)
-- Always apply Valve Discount (-112.99) before Grand Total
+A project may contain multiple models, but **each model produces exactly one takeoff**.
 
-### Future (v2+)
-- Upgrade (delta) workflows by area (Kitchen / Master / Secondary / Powder)
-- Version diff UI
-- AI-assisted extraction from plumbing plans
+Example:
 
-## 3. Users
+Project: KEYS GATE II TH  
+Models: 1333, 1455, 1585  
 
-- Primary user: Karel (creates and maintains take-offs)
-- Reviewer: Eric (reviews proposal numbers before submission)
+→ 3 takeoffs total
 
-## 4. System Context
+---
 
-### Inputs
-- Manual counts derived from plans (fixture points, distances, tubs, hose bibbs, etc.)
-- Item catalog data (internal stable item code, descriptions, unit, default taxable)
-- Prices (editable at any time)
-- Project status (in-course vs closed) for future price update automation
+## 2. Core Architectural Layers
 
-### Outputs
-- Take-Off PDF by Project + Model Group
-- Versioned snapshots (V1/V2/...) and a CURRENT working version in the database
+The application follows a simplified layered architecture.
 
-## 5. Architecture Summary
+```
+CLI Layer
+    ↓
+Application Services
+    ↓
+Domain Logic
+    ↓
+Templates / Snapshot Storage
+    ↓
+Render / Export Layer
+```
 
-### Application type
-Local web app:
-- UI: Streamlit (runs on the user’s machine)
-- Database: SQLite
-- PDF generation: ReportLab
+### CLI Layer
 
-### Layers (practical clean architecture)
-- **domain/**: business entities + business rules (no UI, no DB)
-- **application/**: use-cases (orchestrates domain logic)
-- **infrastructure/**: SQLite repositories, PDF generator, file storage
-- **ui/**: Streamlit pages and forms
+Responsible for user interaction.
 
-This keeps business logic stable even if the UI changes later.
+Main entry point:
 
-## 6. Key Business Rules (high level)
+```
+cli.py
+```
 
-- Stages: Ground, TopOut, Final
-- Split items (absolute): MAT’L PER FIXTURE, LABOR PER FIXTURE, DBL-BOWL VANITY
-  - Ground factor: 0.30
-  - TopOut factor: 0.30
-  - Final factor: 0.40
-- Stage-only items:
-  - Ground-only: sewer/water line items, permit
-  - TopOut-only: ice maker, hose bibb, bathtub items
-  - Final-only: install services + finish fixtures and materials
-- Tax rate is fixed at 7%, but taxable is controlled per item (some “materials” are NO TAX by agreement)
-- Valve Discount is always applied as -112.99 before Grand Total
-- Versioning:
-  - CURRENT is editable
-  - V1/V2/V3 are immutable snapshots
+Responsibilities:
 
-## 7. Data Flow (end-to-end)
+• Create projects  
+• Generate takeoffs  
+• Create snapshots  
+• Export bundles  
+• Run summaries  
 
-1) Create Project
-2) Create or select Model Group (optionally grouped models if identical)
-3) Load a Template (preferred) or start from a generic template
-4) Enter counts and exceptions
-5) System generates lines for each stage using templates + rules
-6) User edits/overrides lines as needed for special projects
-7) Save snapshots (V1/V2/...) when changes must be preserved
-8) Generate PDF on demand
+The CLI **never contains business rules**.
 
-## 8. UI Pages (Streamlit)
+---
 
-### 8.1 Projects
-- Create/edit projects
-- Track status (in-course/closed)
+### Application Layer
 
-### 8.2 Items Catalog
-- CRUD items
-- Maintain internal stable item codes
-- Maintain default taxable flag and item type metadata
+Location:
 
-### 8.3 Templates
-- Model templates (per model)
-- Model group templates (common sets of models)
-- Admin tools: rename, merge, delete duplicates
+```
+app/application/
+```
 
-### 8.4 Takeoffs
-- Create takeoff from template
-- Edit counts and lines
-- Snapshot version (V1/V2/...)
-- Generate PDF
+Responsibilities:
 
-## 9. PDF Generation Strategy
+• Orchestrate workflows
+• Call domain services
+• Coordinate rendering and export
 
-The PDF should match the existing company format as closely as possible:
-- Title + company name
-- Created at date
-- A table per stage with fixed row ordering
-- Stage totals (subtotal, tax, stage total)
-- Grand totals + Valve Discount (-112.99) before final grand total
+Examples:
 
-Implementation notes:
-- Use ReportLab tables for predictable layout
-- Remove the “%Tax” column (tax rate is always 7%)
-- Keep a “Tax amount” column
-- Store `sort_order` per line to preserve the same line sequence used today
+```
+render_takeoff.py
+save_takeoff.py
+summarize_project.py
+```
 
-## 10. Logging & Error Handling
+These modules combine domain logic with output generation.
 
-- Use Python `logging` for:
-  - invalid inputs
-  - missing required counts
-  - missing prices
-  - PDF generation failures
-- UI should show friendly messages while logs capture full details.
+---
 
-## 11. Testing Strategy
+### Domain Layer
 
-- Unit tests for:
-  - stage factor rules (30/30/40)
-  - tax calculation using taxable flags
-  - valve discount
-  - water heater install selection and quantities
-- PDF tests:
-  - generate a PDF and assert required text/totals exist (lightweight “golden” tests)
-- Fixtures:
-  - store sample input datasets (not necessarily the full PDF content)
+Location:
 
-## 12. Deployment & Storage
+```
+app/domain/
+```
 
-- Runs locally on Mac/Windows
-- Repo stored in OneDrive for home/work usage
-- Outputs stored in an `outputs/` folder (path configurable)
+Contains the **core plumbing takeoff logic**.
 
-Risk note:
-- Avoid opening the same SQLite DB simultaneously from two computers to prevent sync conflicts.
+Responsibilities:
 
-# System Design — Take-Off App
+• Fixture quantity calculations  
+• Derived quantities  
+• Template expansion  
+• Snapshot preparation  
 
-## Purpose
-Generate a Take-Off report from domain data and render it to different outputs (PDF, JSON, etc.)
-using a clean architecture approach.
+This layer enforces the plumbing takeoff business rules defined in **BusinessRules.md**.
 
-## High-level Flow
-1. Domain objects exist (Takeoff, TakeoffLine, Item, Stage).
-2. Application use-case orchestrates the process.
-3. Reporting layer builds a pure DTO (TakeoffReport).
-4. A renderer (port) turns that DTO into a file (adapter: PDF/JSON).
+---
 
-## Layers
+### Templates
 
-### Domain (`app/domain/`)
-**What:** Core business rules and calculations.  
-**Depends on:** nothing else in the app.
+Location:
 
-### Reporting (`app/reporting/`)
-**What:** Report DTOs + builder mapping from domain -> report DTO, plus renderer port definitions.  
-**Depends on:** Domain (for mapping inputs), stdlib.
+```
+templates/
+```
 
-### Application (`app/application/`)
-**What:** Use-cases that orchestrate work (build report + call renderer).  
-**Depends on:** Domain + Reporting.
+Templates represent **default takeoff configurations**.
 
-### Infrastructure (`app/infrastructure/`)
-**What:** Concrete implementations of ports (ReportLab PDF, JSON debug, etc.).  
-**Depends on:** Reporting + external libraries.
+Examples:
 
-### Scripts (`scripts/`)
-**What:** Local demos / manual runs.  
-**Depends on:** Application + concrete infrastructure adapters.
+```
+TH
+Villa
+SF
+```
 
-## Dependency Rules (Non-negotiable)
-- Domain MUST NOT import from reporting/application/infrastructure.
-- Reporting MAY import Domain (for mapping inputs).
-- Application MAY import Domain + Reporting.
-- Infrastructure MAY import Reporting (DTO + Port), plus external libs.
+Templates contain default quantities such as:
 
-## Current Renderers
-- PDF: `ReportLabTakeoffPdfRenderer` (ReportLab)
-- JSON: `DebugJsonTakeoffReportRenderer` (stdlib json)
+• sewer distance  
+• water distance  
+• default hose bib count  
+• fixture defaults
 
-## Extension Points
-To add a new output format:
-1. Implement `TakeoffReportRenderer` in `app/infrastructure/`.
-2. Use `RenderTakeoffReport(renderer=YourRenderer())`.
+Templates can be edited at any time.
+
+Project takeoffs inherit template defaults but remain **independent once created**.
+
+---
+
+### Snapshot System
+
+Each takeoff generation produces a **versioned snapshot**.
+
+Snapshots are immutable once created.
+
+Purpose:
+
+• preserve historical takeoffs  
+• guarantee reproducibility  
+• allow auditing  
+
+Snapshots store:
+
+• quantities  
+• item mappings  
+• financial totals  
+• metadata
+
+---
+
+### Export Layer
+
+Exports generate deliverables for different stakeholders.
+
+Supported outputs:
+
+• PDF (for management review)  
+• CSV (for analysis)  
+• JSON (for system integrations)  
+• Financial summary  
+• Snapshot bundle
+
+Example output name:
+
+```
+KEYS GATE II TH (1333,1455,1585)
+WILTON MANORS (3613)
+```
+
+---
+
+## 3. Project Lifecycle
+
+The system supports the following lifecycle.
+
+1. Create Project  
+2. Generate Takeoff per Model  
+3. Produce Snapshot  
+4. Export Deliverables  
+5. Review / Adjust (new snapshot if needed)
+
+Once a project is **closed**:
+
+• No new takeoffs can be created  
+• Existing takeoffs cannot be modified  
+• Snapshots remain viewable for verification
+
+---
+
+## 4. Future Extensions
+
+Planned improvements:
+
+• Plan-reading input schema  
+• Automatic takeoff generation from plan counts  
+• Fixture specification mapping  
+• Role-based access (admin vs read-only users)
+
+These extensions will be implemented without altering the core snapshot architecture.
+
+---
+
+## 5. Future Extension — Derived Quantities Layer
+
+After `PlanReadingInput`, the system will calculate a dedicated **DerivedQuantities** layer before mapping to final fixture items.
+
+Target flow:
+
+`PlanReadingInput -> DerivedQuantities -> FixtureMapping -> TakeoffLines -> ManualAdjustments -> Snapshot`
+
+Purpose of this intermediate layer:
+
+• centralize business-rule calculations  
+• keep plan-reading logic separate from fixture selection  
+• allow future automation of takeoff generation  
+• reduce repetitive manual counting work
+
+Examples of derived quantities:
+
+• water_points  
+• shower_trim_qty  
+• tub_shower_trim_qty  
+• pedestal_qty  
+• install_ice_maker_qty  
+• install_tank_water_heater_qty  
+• install_tankless_water_heater_qty

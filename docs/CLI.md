@@ -256,3 +256,53 @@ python -m app.cli render --id <TAKEOFF_ID> --repo-dir data/takeoffs --format pdf
 ```bash
 python -m app.cli render --input sample --format pdf --out outputs/sample.pdf --tax-rate 0.07
 ```
+
+---
+
+# Extended CLI Workflows (Operational Tools)
+
+Later development added additional CLI commands used for project inspection, reporting and export. These extend the original CLI capabilities without changing the core save/render workflow.
+
+## Project Summary
+
+```bash
+python -m app.cli projects summary --code PROJ-001
+```
+
+Displays:
+
+- number of takeoffs
+- totals per stage
+- model breakdown
+
+## Project Invoice Summary
+
+```bash
+python -m app.cli projects invoice --code PROJ-001
+```
+
+Outputs a textual financial summary including:
+
+- stage totals
+- grand totals
+- valve discount
+- totals per model
+
+This is currently an **analysis tool**, not a QuickBooks export.
+
+## Export Snapshot Bundle
+
+```bash
+python -m app.cli takeoffs export-bundle --version-id <VERSION_ID>
+```
+
+Exports a deterministic bundle containing:
+
+- rendered PDF
+- revision report
+- metadata
+- phase summary
+
+Bundles are tied to immutable snapshot versions.
+
+These workflows were added after the original CLI design and are considered operational tooling built on top of the original architecture.
