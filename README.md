@@ -5,9 +5,12 @@ Take-Off App is a command-line application designed to generate and manage plumb
 It supports:
 
 - PDF output (ReportLab)
-- JSON debug output
+- JSON output
 - CSV export
-- Local persistence of take-offs
+- SQLite persistence for projects, templates, takeoffs, and snapshots
+- Snapshot versioning with immutable revision history
+- Integrity hash verification for versioned snapshots
+- Project summary, export, package, and invoice workflows
 - Strong typing with mypy
 - Static analysis with ruff
 - Automated testing with pytest
@@ -51,15 +54,21 @@ The system follows a Clean Architecture / Hexagonal Architecture design.
 Key use cases:
 - `ResolveTakeoff`
 - `RenderTakeoff`
+- `RenderTakeoffFromVersion`
 - `SaveTakeoff`
 - `SaveTakeoffFromInput`
 - `LoadTakeoff`
+- `InspectTakeoff`
+- `SummarizeProject`
+- `GenerateProjectInvoice`
+- `ExportRevisionBundle`
 
 **Infrastructure (`app/infrastructure/`)**
 - PDF renderer (ReportLab)
 - CSV renderer
 - JSON renderer
-- File-based repository
+- SQLite repositories
+- SQLite schema migrations
 - RendererRegistry (maps OutputFormat → concrete renderer)
 
 **CLI (`app/cli.py`)**
@@ -71,19 +80,19 @@ Key use cases:
 
 ---
 
-# Input Model (Polymorphic Design)
+# Business Model
 
-The system uses a polymorphic input abstraction:
+The system is designed around **project + model** takeoffs.
 
-`TakeoffInputSource` (Protocol)
+Key assumptions:
 
-Concrete implementations:
+- Takeoffs are created **per project and per model**, not per lot.
+- If a project uses 3 models, it normally has 3 takeoffs.
+- Project-specific changes affect only that project’s takeoff.
+- Permanent future changes should later be applied to the default / standard model library.
+- Snapshots represent immutable historical revisions of a takeoff.
 
-- `JsonTakeoffInput`
-- `FactoryTakeoffInput`
-- `RepoTakeoffInput`
-
-This removes conditional logic from application use cases.
+This keeps estimating logic separated from billing or lot-level execution.
 
 ---
 
@@ -109,6 +118,38 @@ You can use the application from the terminal using:
 python -m app.cli <command> [options]
 ```
 
+## Main SQLite Workflows
+
+### Project Summary
+
+```bash
+python -m app.cli projects summary --code PROJ-001
+```
+
+### Project Export
+
+```bash
+python -m app.cli projects export --code PROJ-001
+```
+
+### Project Package
+
+```bash
+python -m app.cli projects package --code PROJ-001
+```
+
+### Project Invoice
+
+```bash
+python -m app.cli projects invoice --code PROJ-001
+```
+
+### Verify Snapshot Integrity
+
+```bash
+python -m app.cli takeoffs verify-version --version-id <VERSION_ID>
+```
+
 ---
 
 ## Takeoff Revision Management
@@ -123,6 +164,8 @@ Features include:
 - Financial impact diff
 - Revision reports
 - Revision locking and revision workflow
+ - Snapshot bundle export
+ - Integrity schema versioning
 
 ### View Takeoff History
 
@@ -142,6 +185,8 @@ A full revision deliverable can be exported as a **bundle** containing:
 - Rendered Takeoff PDF
 - Revision Report
 - Metadata describing the revision
+- Phase summary
+- Integrity hash and schema version in metadata
 
 ### Command
 
@@ -162,6 +207,7 @@ outputs/
         takeoff_v<version>.pdf
         revision_report_v<prev>_to_v<version>.txt
         metadata.json
+        phase_summary.txt
 ```
 
 Example:
@@ -177,6 +223,96 @@ This bundle represents a **complete revision deliverable** that can be:
 - shared with field teams
 
 The bundle generation is deterministic and tied to the immutable snapshot version.
+
+---
+
+## Project Export
+
+The system can export a full project workspace using the latest snapshot of each takeoff.
+
+### Command
+
+```bash
+python -m app.cli projects export --code PROJ-001
+```
+
+### Export Contents
+
+The project export currently generates:
+
+- project summary (`json` and `txt`)
+- financial summary (`txt`)
+- deliverable files per model (`pdf`, `csv`, `json`)
+- latest snapshot bundle per takeoff
+
+Typical structure:
+
+```
+outputs/
+  PROJ-001/
+    <project_name>_(<models>)_project_summary.json
+    <project_name>_(<models>)_project_summary.txt
+    <project_name>_(<models>)_financial_summary.txt
+    deliverable/
+      <project_name>_(<model>).pdf
+      <project_name>_(<model>).csv
+      <project_name>_(<model>).json
+    takeoffs/
+      <template_code>/
+        latest/
+          ...snapshot bundle...
+```
+
+---
+
+## Project Package
+
+The system can assemble a structured project package for delivery and review.
+
+### Command
+
+```bash
+python -m app.cli projects package --code PROJ-001
+```
+
+### Package Structure
+
+```
+outputs/
+  PROJ-001_PACKAGE/
+    01_SUMMARY/
+    02_MODELS/
+    03_SNAPSHOTS/
+```
+
+This package is intended for:
+
+- management review
+- purchasing / materials review
+- project archiving
+- snapshot audit trail reference
+
+---
+
+## Project Invoice
+
+The system can generate a project invoice summary by construction phase.
+
+### Command
+
+```bash
+python -m app.cli projects invoice --code PROJ-001
+```
+
+### Current Output
+
+The invoice summary currently reports:
+
+- stage totals for `GROUND`, `TOPOUT`, and `FINAL`
+- grand totals
+- model-level breakdown
+
+This is currently a reporting / analysis workflow and not a final QuickBooks export pipeline.
 
 ---
 
@@ -235,13 +371,13 @@ python -m app.cli save \
 
 # Where Data Is Stored
 
-Saved takeoffs are stored locally in:
+SQLite data is stored locally in the configured database file, typically:
 
 ```
-data/takeoffs/
+data/takeoff.db
 ```
 
-Generated reports can be stored anywhere using `--out`.
+Generated reports, revision bundles, project exports, and project packages are stored under the configured output folder (for example `outputs/`).
 
 ---
 
@@ -268,10 +404,15 @@ See:
 
 # Current Status
 
-Version: **v1.0 — Input Unified Architecture**
+Version: **v2.0 — SQLite Versioned Takeoff Platform**
 
-- Polymorphic input model implemented
-- Save and Render share architecture
+Implemented capabilities include:
+
+- SQLite-backed projects, templates, template lines, takeoffs, and takeoff lines
+- Takeoff revision lifecycle with snapshots, history, diff, and revision reports
+- Immutable snapshot bundles with metadata, phase summaries, and integrity verification
+- Project summary, export, package, and invoice summary workflows
+- Render workflows for both live takeoffs and frozen versions
 - Clean dependency boundaries enforced
 - All tests passing
 - Fully typed codebase
