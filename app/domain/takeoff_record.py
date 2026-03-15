@@ -11,4 +11,5 @@ class TakeoffRecord:
     template_code: str
     tax_rate: Decimal
     valve_discount: Decimal = Decimal("0.00")
+    is_locked: bool = False
     created_at: str = ""

@@ -88,6 +88,15 @@ class SqliteTakeoffLineRepository(TakeoffLineRepository):
         if line.sort_order < 0:
             raise InvalidInputError("sort_order must be >= 0")
 
+        takeoff_row = self.conn.execute(
+            "SELECT is_locked FROM takeoffs WHERE takeoff_id = ?",
+            (line.takeoff_id,),
+        ).fetchone()
+        if takeoff_row is None:
+            raise InvalidInputError(f"Takeoff not found: {line.takeoff_id}")
+        if bool(int(takeoff_row["is_locked"])):
+            raise InvalidInputError(f"Takeoff is locked: {line.takeoff_id}")
+
         existing = self.conn.execute(
             """
             SELECT 1
@@ -149,6 +158,15 @@ class SqliteTakeoffLineRepository(TakeoffLineRepository):
             raise InvalidInputError("takeoff_id cannot be empty")
         if not str(item_code).strip():
             raise InvalidInputError("item_code cannot be empty")
+
+        takeoff_row = self.conn.execute(
+            "SELECT is_locked FROM takeoffs WHERE takeoff_id = ?",
+            (takeoff_id,),
+        ).fetchone()
+        if takeoff_row is None:
+            raise InvalidInputError(f"Takeoff not found: {takeoff_id}")
+        if bool(int(takeoff_row["is_locked"])):
+            raise InvalidInputError(f"Takeoff is locked: {takeoff_id}")
 
         row = self.conn.execute(
             """
@@ -256,6 +274,15 @@ class SqliteTakeoffLineRepository(TakeoffLineRepository):
             raise InvalidInputError("takeoff_id cannot be empty")
         if not str(item_code).strip():
             raise InvalidInputError("item_code cannot be empty")
+
+        takeoff_row = self.conn.execute(
+            "SELECT is_locked FROM takeoffs WHERE takeoff_id = ?",
+            (takeoff_id,),
+        ).fetchone()
+        if takeoff_row is None:
+            raise InvalidInputError(f"Takeoff not found: {takeoff_id}")
+        if bool(int(takeoff_row["is_locked"])):
+            raise InvalidInputError(f"Takeoff is locked: {takeoff_id}")
 
         cur = self.conn.execute(
             """

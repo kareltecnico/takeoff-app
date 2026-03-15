@@ -129,6 +129,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
             template_code TEXT NOT NULL,
             tax_rate TEXT NOT NULL,
             valve_discount TEXT NOT NULL DEFAULT '0.00',
+            is_locked INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now')),
             FOREIGN KEY (project_code) REFERENCES projects(project_code) ON DELETE RESTRICT,
@@ -140,6 +141,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if not _has_column(conn, "takeoffs", "valve_discount"):
         conn.execute(
             "ALTER TABLE takeoffs ADD COLUMN valve_discount TEXT NOT NULL DEFAULT '0.00'"
+        )
+    if not _has_column(conn, "takeoffs", "is_locked"):
+        conn.execute(
+            "ALTER TABLE takeoffs ADD COLUMN is_locked INTEGER NOT NULL DEFAULT 0"
         )
 
     conn.execute(
@@ -198,6 +203,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
             takeoff_id TEXT NOT NULL,
             version_number INTEGER NOT NULL,
             notes TEXT NULL,
+            created_by TEXT NULL,
+            reason TEXT NULL,
 
             -- Pin context for reproducible rendering
             project_code_snapshot TEXT NOT NULL DEFAULT '',
@@ -206,6 +213,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
             -- Snapshotted financial context
             tax_rate_snapshot TEXT NOT NULL,
             valve_discount_snapshot TEXT NOT NULL DEFAULT '0.00',
+            integrity_hash TEXT NOT NULL DEFAULT '',
+            integrity_schema_version INTEGER NOT NULL DEFAULT 1,
 
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
 
@@ -229,6 +238,22 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if not _has_column(conn, "takeoff_versions", "template_code_snapshot"):
         conn.execute(
             "ALTER TABLE takeoff_versions ADD COLUMN template_code_snapshot TEXT NOT NULL DEFAULT ''"
+        )
+    if not _has_column(conn, "takeoff_versions", "created_by"):
+        conn.execute(
+            "ALTER TABLE takeoff_versions ADD COLUMN created_by TEXT NULL"
+        )
+    if not _has_column(conn, "takeoff_versions", "reason"):
+        conn.execute(
+            "ALTER TABLE takeoff_versions ADD COLUMN reason TEXT NULL"
+        )
+    if not _has_column(conn, "takeoff_versions", "integrity_hash"):
+        conn.execute(
+            "ALTER TABLE takeoff_versions ADD COLUMN integrity_hash TEXT NOT NULL DEFAULT ''"
+        )
+    if not _has_column(conn, "takeoff_versions", "integrity_schema_version"):
+        conn.execute(
+            "ALTER TABLE takeoff_versions ADD COLUMN integrity_schema_version INTEGER NOT NULL DEFAULT 1"
         )
 
     # Enforce one takeoff per (project_code, template_code)

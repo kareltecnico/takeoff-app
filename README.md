@@ -111,6 +111,75 @@ python -m app.cli <command> [options]
 
 ---
 
+## Takeoff Revision Management
+
+The system supports full revision lifecycle management for takeoffs.
+
+Features include:
+
+- Snapshot creation
+- Revision history timeline
+- Version comparison (diff)
+- Financial impact diff
+- Revision reports
+- Revision locking and revision workflow
+
+### View Takeoff History
+
+Displays the full revision timeline of a takeoff.
+
+```bash
+python -m app.cli --db-path data/takeoff.db takeoffs history \
+  --id <TAKEOFF_ID>
+```
+
+---
+
+## Export Revision Bundle
+
+A full revision deliverable can be exported as a **bundle** containing:
+
+- Rendered Takeoff PDF
+- Revision Report
+- Metadata describing the revision
+
+### Command
+
+```bash
+python -m app.cli --db-path data/takeoff.db takeoffs export-revision \
+  --version-id <VERSION_ID>
+```
+
+### Output Structure
+
+The system generates a deterministic folder structure:
+
+```
+outputs/
+  <project_code>/
+    <template_code>/
+      v<version_number>/
+        takeoff_v<version>.pdf
+        revision_report_v<prev>_to_v<version>.txt
+        metadata.json
+```
+
+Example:
+
+```
+outputs/PROJ-001/TH_DEFAULT/v6/
+```
+
+This bundle represents a **complete revision deliverable** that can be:
+
+- archived
+- reviewed by supervisors
+- shared with field teams
+
+The bundle generation is deterministic and tied to the immutable snapshot version.
+
+---
+
 ## Render
 
 Render generates a report (PDF, JSON, or CSV).
