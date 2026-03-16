@@ -118,6 +118,47 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if not _has_column(conn, "template_lines", "sort_order"):
         conn.execute("ALTER TABLE template_lines ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
 
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS template_fixture_mappings (
+            mapping_id TEXT PRIMARY KEY,
+            template_code TEXT NOT NULL,
+            source_kind TEXT NOT NULL,
+            source_name TEXT NULL,
+            constant_qty TEXT NULL,
+            item_code TEXT NOT NULL,
+            qty_multiplier TEXT NOT NULL DEFAULT '1.0',
+            stage TEXT NOT NULL DEFAULT 'final',
+            factor TEXT NOT NULL DEFAULT '1.0',
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            notes TEXT NULL,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (template_code) REFERENCES templates(template_code) ON DELETE CASCADE,
+            FOREIGN KEY (item_code) REFERENCES items(internal_item_code)
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS project_fixture_overrides (
+            project_code TEXT NOT NULL,
+            mapping_id TEXT NOT NULL,
+            is_disabled INTEGER NOT NULL DEFAULT 0,
+            item_code_override TEXT NULL,
+            notes_override TEXT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (project_code, mapping_id),
+            FOREIGN KEY (project_code) REFERENCES projects(project_code) ON DELETE CASCADE,
+            FOREIGN KEY (mapping_id) REFERENCES template_fixture_mappings(mapping_id) ON DELETE CASCADE,
+            FOREIGN KEY (item_code_override) REFERENCES items(internal_item_code)
+        )
+        """
+    )
+
     # -------------------------
     # Takeoffs (snapshot)
     # -------------------------
