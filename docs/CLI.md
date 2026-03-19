@@ -257,6 +257,51 @@ python -m app.cli render --id <TAKEOFF_ID> --repo-dir data/takeoffs --format pdf
 python -m app.cli render --input sample --format pdf --out outputs/sample.pdf --tax-rate 0.07
 ```
 
+### Generate current takeoff from plan readings
+
+This command creates a CURRENT takeoff in SQLite using the documented pipeline:
+
+`PlanReadingInput -> DerivedQuantities -> FixtureMapping -> TakeoffLines`
+
+Example:
+
+```bash
+python -m app.cli --db-path data/takeoff.db takeoffs generate-from-plan \
+  --project PROJ-001 \
+  --template TH_DEFAULT \
+  --stories 2 \
+  --kitchens 1 \
+  --garbage-disposals 1 \
+  --laundry-rooms 1 \
+  --lav-faucets 4 \
+  --toilets 3 \
+  --showers 2 \
+  --bathtubs 1 \
+  --half-baths 1 \
+  --double-bowl-vanities 1 \
+  --hose-bibbs 2 \
+  --ice-makers 1 \
+  --water-heater-tank-qty 0 \
+  --water-heater-tankless-qty 2 \
+  --sewer-distance-lf 40 \
+  --water-distance-lf 25
+```
+
+Behavior:
+
+- Creates a new CURRENT takeoff for the given project and template
+- Fails if a conflicting CURRENT takeoff already exists for the same generation target
+- Does not automatically create a snapshot version
+- Persists generated live lines with `mapping_id` when available
+
+Notes:
+
+- All plan-reading numeric inputs are required.
+- Counts and distances must be non-negative.
+- The command creates CURRENT takeoff lines; snapshot/version creation remains a separate step.
+- If all resolved quantities are zero, or all effective mapping rules are disabled, generation fails and no empty CURRENT takeoff is created.
+- Legacy duplicate lines without `mapping_id` remain a known accepted limitation for structural diff/report comparison.
+
 ---
 
 # Extended CLI Workflows (Operational Tools)

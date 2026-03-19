@@ -191,3 +191,239 @@ Grand totals:\
 ### v2 Upgrades\
 - UpgradeSet (project/model group)\
 - UpgradeLine (add/remove delta lines by area)}
+# Data Model — Take-Off App
+
+## 1. Principles
+
+- Use a stable internal identifier for items: `internal_item_code` (unique).
+- Keep CURRENT takeoffs editable and store immutable snapshots as versions.
+- Store taxable as a per-line/per-item flag (tax rate fixed but applicability varies).
+- Preserve line ordering using `sort_order` so PDFs match the current standard format.
+- Support duplicate `item_code` rows across stages through surrogate line identity.
+- Preserve `mapping_id` on generated lines for traceability and version diff behavior.
+
+## 2. Entities
+
+### 2.1 Project
+Represents a Lennar (or other contractor) project/community.
+
+**Fields**
+- id (PK)
+- contractor_name (string)
+- project_name (string, required)
+- status (enum: in_course | closed)
+- created_at (datetime)
+- updated_at (datetime)
+
+### 2.2 Item (Item Catalog)
+Master list of items used across takeoffs.
+
+**Fields**
+- id (PK)
+- internal_item_code (string, UNIQUE, required)
+- lennar_item_number (string, nullable)
+- description1 (string, required)
+- description2 (string, nullable)
+- unit (string, e.g., EA, LF)
+- item_type (enum: material | service)
+- default_taxable (bool)
+- created_at (datetime)
+- updated_at (datetime)
+
+### 2.3 Template
+Reusable default configuration by category or model grouping.
+
+**Fields**
+- id (PK)
+- template_code (string, UNIQUE, required)
+- template_name (string, required)
+- category (string, e.g. TH / Villa / SF)
+- active (bool)
+- created_at (datetime)
+- updated_at (datetime)
+
+### 2.4 Template Line (Legacy / Manual Path)
+Default line items used by the older template-seeding path.
+
+**Fields**
+- id (PK)
+- template_code (FK)
+- item_code (FK -> Item.internal_item_code)
+- qty
+- notes
+- active
+
+### 2.5 Template Fixture Mapping Rule
+Default rule that converts plan/derived quantities into a takeoff line.
+
+**Fields**
+- mapping_id (PK, stable surrogate key)
+- template_code (FK)
+- source_kind (`derived` | `plan` | `constant`)
+- source_name (nullable)
+- constant_qty (nullable)
+- item_code (FK -> Item.internal_item_code)
+- qty_multiplier
+- stage
+- factor
+- sort_order
+- notes (nullable)
+- is_active
+- created_at
+- updated_at
+
+### 2.6 Project Fixture Override
+Project-specific override over a template mapping rule.
+
+**Fields**
+- project_code (FK)
+- mapping_id (FK -> TemplateFixtureMappingRule.mapping_id)
+- is_disabled
+- item_code_override (nullable FK -> Item.internal_item_code)
+- notes_override (nullable)
+- created_at
+- updated_at
+
+Primary key:
+- `(project_code, mapping_id)`
+
+### 2.7 PlanReadingInput
+Structured raw input read from plans.
+
+**Fields**
+- stories
+- kitchens
+- laundry_rooms
+- lav_faucets
+- toilets
+- showers
+- bathtubs
+- half_baths
+- double_bowl_vanities
+- hose_bibbs
+- ice_makers
+- garbage_disposals
+- water_heater_tank_qty
+- water_heater_tankless_qty
+- sewer_distance_lf
+- water_distance_lf
+
+### 2.8 Takeoff (CURRENT)
+Editable working takeoff.
+
+**Fields**
+- id (PK)
+- project_id (FK -> Project.id)
+- model_group_display (string, required)
+- models_json (text JSON array)
+- stories (int, required)
+- counts_json (text JSON object)
+- created_at
+- updated_at
+
+### 2.9 Takeoff Line (CURRENT)
+Line items for CURRENT takeoff.
+
+**Fields**
+- line_id (PK)
+- takeoff_id (FK -> Takeoff.id)
+- mapping_id (nullable)
+- stage
+- item_code
+- item_number
+- description1
+- description2
+- unit
+- price
+- qty
+- factor
+- taxable
+- sort_order
+- created_at
+- updated_at
+
+Notes:
+- `line_id` is the live-row identity.
+- `mapping_id` is nullable and is used for traceability to the mapping rule.
+- Duplicate `item_code` rows are allowed.
+
+### 2.10 Takeoff Version (Snapshot)
+Immutable snapshot label for the takeoff at a point in time.
+
+**Fields**
+- id (PK)
+- takeoff_id (FK -> Takeoff.id)
+- version_no (int, required)
+- created_at (datetime)
+- notes (nullable)
+
+### 2.11 Takeoff Version Line (Snapshot Lines)
+Copy of Takeoff Lines at snapshot time.
+
+**Fields**
+- version_line_id (PK)
+- takeoff_version_id (FK -> TakeoffVersion.id)
+- mapping_id (nullable)
+- stage
+- internal_item_code
+- item_number
+- description1
+- description2
+- unit
+- price
+- qty
+- factor
+- taxable
+- sort_order
+
+Notes:
+- `version_line_id` is the snapshot-row identity.
+- `mapping_id` is preserved to support structural diff comparison across versions.
+- Values are denormalized so a version never changes even if the item catalog changes later.
+
+### 2.12 Settings
+Key-value settings.
+
+**Fields**
+- key (PK string)
+- value (string)
+
+Initial settings:
+- TAX_RATE = `0.07`
+- VALVE_DISCOUNT = `-112.99`
+
+## 3. Relationships
+
+- Project 1—* Takeoff
+- Takeoff 1—* TakeoffLine
+- Takeoff 1—* TakeoffVersion
+- TakeoffVersion 1—* TakeoffVersionLine
+- Template 1—* TemplateFixtureMappingRule
+- Project 1—* ProjectFixtureOverride
+- Item 1—* TemplateFixtureMappingRule
+
+## 4. Totals Computation (Per Line)
+
+For a given line:
+- line_subtotal = price * qty * factor
+- tax_amount = line_subtotal * TAX_RATE if taxable else 0
+- line_total = line_subtotal + tax_amount
+
+Stage totals:
+- stage_subtotal = sum(line_subtotal)
+- stage_tax = sum(tax_amount)
+- stage_total = stage_subtotal + stage_tax
+
+Grand totals:
+- grand_subtotal = sum(stage_subtotal)
+- grand_tax = sum(stage_tax)
+- grand_total = grand_subtotal + grand_tax
+- grand_total_after_discount = grand_total + VALVE_DISCOUNT
+
+## 5. Known Limitation
+
+Legacy duplicate lines without `mapping_id` are intentionally not structurally comparable in diff/report behavior.
+
+Structural diff uses:
+- `mapping_id` when present
+- legacy `item_code` fallback only when uniquely identifiable

@@ -411,6 +411,11 @@ Trade-offs:
 
 • Slightly more complex internal pipeline
 
+Current implementation notes:
+
+• Plan-driven takeoff generation must fail when the resolved mapped line set is empty. If all resolved quantities are zero, or all effective mapping rules are disabled, the system must not create an empty CURRENT takeoff.  
+• Diff/report behavior accepts one known limitation for legacy data: duplicate lines without `mapping_id` are not structurally comparable. Structural comparison uses `mapping_id` when present, and only falls back to legacy `item_code` matching when the legacy lines are uniquely identifiable.
+
 ---
 
 # Notes
@@ -430,3 +435,151 @@ System architecture is defined in:
 `docs/SystemDesign.md`
 
 Do not include business rules or requirements in this document.
+
+# Architectural Decisions — Take-Off App
+
+This document records important architectural and design decisions made during the development of the Take-Off App.
+
+Each decision explains what was decided, why it was decided, and the impact on the system.
+
+---
+
+# 2026-03 — Introduce Plan Reading Input Schema
+
+## Decision
+Introduce a structured `PlanReadingInput` schema to represent quantities read directly from architectural plans before any takeoff lines are generated.
+
+## Context
+Originally, takeoffs were created directly by manually entering line items. During system design it became clear that many takeoff quantities are derived from a smaller set of plan readings.
+
+## Consequences
+Benefits:
+- Separates raw plan data from billing logic
+- Enables future automation of takeoff generation
+- Makes calculations traceable and auditable
+- Reduces manual errors during takeoff creation
+
+Trade-off:
+- Introduces an additional domain model layer
+
+---
+
+# 2026-03 — Introduce Derived Quantities Layer
+
+## Decision
+Introduce a `DerivedQuantities` intermediate model between `PlanReadingInput` and final takeoff item mapping.
+
+## Context
+Many takeoff quantities are not read directly from the plan; they are calculated from raw inputs.
+
+## Consequences
+Benefits:
+- Keeps business-rule calculations isolated
+- Improves maintainability
+- Allows easier testing of domain logic
+- Simplifies future automation
+
+Trade-off:
+- Adds an additional transformation step in the takeoff pipeline
+
+---
+
+# 2026-03 — Layered Takeoff Generation Pipeline
+
+## Decision
+Adopt a layered takeoff generation pipeline:
+
+`PlanReadingInput -> DerivedQuantities -> FixtureMapping -> TakeoffLines`
+
+## Context
+The system needs a clear separation between:
+1. Data read from plans
+2. Business-rule calculations
+3. Catalog item selection
+4. Final invoice/takeoff lines
+
+## Consequences
+Benefits:
+- Clear separation of concerns
+- Easier debugging and auditing
+- Future automation can plug into the input layer
+- Fixture catalogs can evolve without rewriting plan-reading logic
+
+Trade-off:
+- Slightly more complex internal pipeline
+
+---
+
+# 2026-03 — Empty Generation Failure Rule
+
+## Decision
+Plan-driven generation must fail when the resolved mapped line set is empty.
+
+## Context
+If all resolved quantities are zero, or all effective mapping rules are disabled, creating an empty CURRENT takeoff would be misleading and operationally unsafe.
+
+## Consequences
+- The system must not create an empty CURRENT takeoff
+- Generation returns a controlled failure instead
+- Empty output is treated as an input/mapping problem, not a valid takeoff
+
+---
+
+# 2026-03 — Line Identity Migration
+
+## Decision
+Replace composite item-based identity with surrogate line identity for live and snapshot lines.
+
+## Context
+The system must support duplicate `item_code` rows across stages. Composite keys based on `(takeoff_id, item_code)` and `(version_id, item_code)` were no longer sufficient.
+
+## Consequences
+- `takeoff_lines` use `line_id`
+- `takeoff_version_lines` use `version_line_id`
+- duplicate `item_code` rows are allowed
+- `mapping_id` is preserved for cross-version traceability
+
+---
+
+# 2026-03 — Diff Identity for Generated Lines
+
+## Decision
+Use `mapping_id` as the structural comparison key for generated lines across versions.
+
+## Context
+`item_code` is not stable enough once duplicate lines are allowed, and surrogate row IDs do not provide business identity across versions.
+
+## Consequences
+- Diff/report behavior uses `mapping_id` when present
+- Legacy `item_code` fallback is allowed only when unique
+- Structural comparison remains trustworthy for generated mapped lines
+
+---
+
+# 2026-03 — Accepted Legacy Diff Limitation
+
+## Decision
+Legacy duplicate lines without `mapping_id` are intentionally not structurally comparable.
+
+## Context
+Older lines may not carry a stable business comparison key.
+
+## Consequences
+- Structural diff must trigger a guardrail instead of forcing a misleading comparison
+- Financial totals remain valid
+- Revision reports may warn when structural comparison is unsafe
+
+---
+
+# Notes
+
+This document only records architecture decisions.
+
+Operational rules and calculations are defined in:
+- `docs/BusinessRules.md`
+
+System requirements are defined in:
+- `docs/SRS.md`
+
+System architecture is defined in:
+- `docs/SystemDesign.md`

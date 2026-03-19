@@ -314,3 +314,17 @@ The intended flow is:
 `PlanReadingInput -> DerivedQuantities -> FixtureMapping -> TakeoffLines`
 
 This separation reduces manual errors, supports automation, and preserves traceability.
+
+---
+
+# 16. Fixture Mapping
+
+Derived quantities are converted into takeoff lines through mapping rules.
+
+Each mapping rule may:
+- produce one or more takeoff lines
+- specify stage, factor, and item_code
+- be overridden per project
+- carry a stable `mapping_id` for traceability
+
+Mapping rules are the source of `mapping_id` used for generated line identity across versions and structural diff behavior.

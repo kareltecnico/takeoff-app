@@ -18,6 +18,15 @@
   - business rules math
   - PDF generation smoke tests
 
+## v1.x — Plan-driven generation (Completed)
+- Structured input (`PlanReadingInput`)
+- Derived quantities layer
+- Fixture mapping engine
+- Project fixture overrides
+- Line identity migration for duplicate items across stages
+- Diff/report redesign using `mapping_id`
+- CLI command for plan-driven takeoff generation
+
 ## v1.1 — Pricing policies for active project updates
 Goal: reduce manual work when item prices change.
 - Price lists with effective dates

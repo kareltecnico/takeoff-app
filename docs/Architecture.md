@@ -165,3 +165,152 @@ This future capability will still respect the current architecture:
 CLI / UI -> Application Use Case -> Domain Rules -> Repository / Reporting / Renderer
 
 The structured input model is intended to reduce repetitive manual work, not to replace the current take-off editing workflow.
+# Architecture
+
+This project follows a Clean Architecture / Hexagonal approach.
+
+Core principle:
+> Domain never depends on Application or Infrastructure.
+
+---
+
+# Layers
+
+## Domain (`app/domain/`)
+- Pure business rules.
+- Entities and value objects (`Takeoff`, `TakeoffLine`, totals, money).
+- No I/O.
+- No infrastructure imports.
+- No application imports.
+
+### Current domain capabilities
+The domain now includes the plan-driven takeoff pipeline:
+
+- `PlanReadingInput`
+- `DerivedQuantities`
+- `FixtureMappingResolver`
+- mapping rules and project overrides
+- snapshot-safe line identities and mapping traceability
+
+---
+
+## Reporting (`app/reporting/`)
+- Report DTOs (`TakeoffReport`, sections, lines).
+- Report builder (`build_takeoff_report`).
+- Renderer port (`TakeoffReportRenderer` Protocol).
+- No concrete infrastructure logic.
+
+---
+
+## Application (`app/application/`)
+- Use case orchestration.
+- Coordinates:
+  - Domain
+  - Reporting builder
+  - Renderer port
+  - Repository port
+
+Key use cases:
+
+- `ResolveTakeoff`
+- `RenderTakeoff`
+- `SaveTakeoff`
+- `SaveTakeoffFromInput`
+- `LoadTakeoff`
+- `GenerateTakeoffFromPlanReading`
+- `InspectTakeoff`
+- `SummarizeProject`
+- `GenerateProjectInvoice`
+- `ExportRevisionBundle`
+
+Application never reads CLI flags directly.
+
+---
+
+## Infrastructure (`app/infrastructure/`)
+Implements adapters:
+
+- PDF renderer (ReportLab)
+- JSON debug renderer
+- CSV renderer
+- File-based repository
+- SQLite repositories
+- RendererRegistry (maps OutputFormat → concrete renderer)
+
+Infrastructure depends on Reporting.
+Application depends only on ports and repository contracts.
+
+---
+
+## CLI
+
+CLI responsibilities:
+
+- Parse args
+- Validate combinations
+- Instantiate infrastructure adapters
+- Build input models
+- Call use cases
+
+CLI contains zero business logic.
+
+---
+
+# Dependency Rules
+
+Allowed:
+
+- domain → nothing
+- reporting → domain
+- application → domain + reporting
+- infrastructure → reporting
+- cli → all layers
+
+Forbidden:
+
+- domain → infrastructure
+- domain → application
+- application → concrete infrastructure
+
+---
+
+# Main Flow (Render)
+
+1. CLI builds input
+2. `RenderTakeoff` calls `ResolveTakeoff`
+3. Reporting builder maps domain → report DTO
+4. RendererRegistry selects renderer
+5. Infrastructure writes output
+
+---
+
+# Main Flow (Save)
+
+1. CLI builds input
+2. `SaveTakeoffFromInput`
+3. `ResolveTakeoff`
+4. `SaveTakeoff` (repository)
+5. File stored locally
+
+---
+
+# Main Flow (Plan-Driven Generation)
+
+1. CLI parses plan-reading inputs
+2. Application builds `PlanReadingInput`
+3. Domain computes `DerivedQuantities`
+4. `FixtureMappingResolver` applies template mapping and optional project override
+5. Application persists CURRENT takeoff lines
+6. Existing snapshot/version flow remains available unchanged
+
+Pipeline:
+
+`PlanReadingInput -> DerivedQuantities -> FixtureMapping -> TakeoffLines -> Snapshot`
+
+---
+
+# Notes
+
+The structured input model is no longer a future concept. It is now part of the implemented backend architecture.
+
+The takeoff editing workflow still exists and remains valid. Plan-driven generation adds an automated generation path; it does not replace manual review, adjustment, or snapshot creation.
