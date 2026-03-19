@@ -3,9 +3,10 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 from decimal import Decimal
+from uuid import uuid4
 
-from app.application.repositories.takeoff_line_repository import TakeoffLineRepository
 from app.application.errors import InvalidInputError
+from app.application.repositories.takeoff_line_repository import TakeoffLineRepository
 from app.domain.stage import Stage
 from app.domain.takeoff_line_snapshot import TakeoffLineSnapshot
 
@@ -28,6 +29,65 @@ def _bool(value: object) -> bool:
 class SqliteTakeoffLineRepository(TakeoffLineRepository):
     conn: sqlite3.Connection
 
+    def _ensure_takeoff_editable(self, *, takeoff_id: str) -> None:
+        takeoff_row = self.conn.execute(
+            "SELECT is_locked FROM takeoffs WHERE takeoff_id = ?",
+            (takeoff_id,),
+        ).fetchone()
+        if takeoff_row is None:
+            raise InvalidInputError(f"Takeoff not found: {takeoff_id}")
+        if bool(int(takeoff_row["is_locked"])):
+            raise InvalidInputError(f"Takeoff is locked: {takeoff_id}")
+
+    def _resolve_line_row(
+        self,
+        *,
+        line_id: str | None = None,
+        takeoff_id: str | None = None,
+        item_code: str | None = None,
+    ) -> sqlite3.Row:
+        if line_id is not None:
+            row = self.conn.execute(
+                """
+                SELECT line_id, takeoff_id, item_code, qty, stage, factor, sort_order
+                FROM takeoff_lines
+                WHERE line_id = ?
+                """,
+                (line_id,),
+            ).fetchone()
+            if row is None:
+                raise InvalidInputError(f"Takeoff line not found: line_id={line_id}")
+            if takeoff_id is not None and str(row["takeoff_id"]) != takeoff_id:
+                raise InvalidInputError(
+                    f"Takeoff line {line_id} does not belong to takeoff_id={takeoff_id}"
+                )
+            return row
+
+        if not str(takeoff_id or "").strip():
+            raise InvalidInputError("takeoff_id cannot be empty")
+        if not str(item_code or "").strip():
+            raise InvalidInputError("item_code cannot be empty")
+
+        rows = self.conn.execute(
+            """
+            SELECT line_id, takeoff_id, item_code, qty, stage, factor, sort_order
+            FROM takeoff_lines
+            WHERE takeoff_id = ? AND item_code = ?
+            """,
+            (takeoff_id, item_code),
+        ).fetchall()
+
+        if not rows:
+            raise InvalidInputError(
+                f"Takeoff line not found: takeoff_id={takeoff_id} item_code={item_code}"
+            )
+        if len(rows) > 1:
+            raise InvalidInputError(
+                "Multiple takeoff lines match this item_code; line_id is required "
+                f"(takeoff_id={takeoff_id} item_code={item_code})"
+            )
+        return rows[0]
+
     def bulk_insert(self, lines: list[TakeoffLineSnapshot]) -> None:
         if not lines:
             return
@@ -37,8 +97,10 @@ class SqliteTakeoffLineRepository(TakeoffLineRepository):
             self.conn.executemany(
                 """
                 INSERT INTO takeoff_lines (
+                    line_id,
                     takeoff_id,
                     item_code,
+                    mapping_id,
                     qty,
                     notes,
                     description_snapshot,
@@ -50,12 +112,14 @@ class SqliteTakeoffLineRepository(TakeoffLineRepository):
                     sort_order,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                 """,
                 [
                     (
+                        getattr(ln, "line_id", None) or uuid4().hex,
                         ln.takeoff_id,
                         ln.item_code,
+                        getattr(ln, "mapping_id", None),
                         str(ln.qty),
                         ln.notes,
                         ln.description_snapshot,
@@ -88,33 +152,15 @@ class SqliteTakeoffLineRepository(TakeoffLineRepository):
         if line.sort_order < 0:
             raise InvalidInputError("sort_order must be >= 0")
 
-        takeoff_row = self.conn.execute(
-            "SELECT is_locked FROM takeoffs WHERE takeoff_id = ?",
-            (line.takeoff_id,),
-        ).fetchone()
-        if takeoff_row is None:
-            raise InvalidInputError(f"Takeoff not found: {line.takeoff_id}")
-        if bool(int(takeoff_row["is_locked"])):
-            raise InvalidInputError(f"Takeoff is locked: {line.takeoff_id}")
-
-        existing = self.conn.execute(
-            """
-            SELECT 1
-            FROM takeoff_lines
-            WHERE takeoff_id = ? AND item_code = ?
-            """,
-            (line.takeoff_id, line.item_code),
-        ).fetchone()
-        if existing is not None:
-            raise InvalidInputError(
-                f"Takeoff line already exists: takeoff_id={line.takeoff_id} item_code={line.item_code}"
-            )
+        self._ensure_takeoff_editable(takeoff_id=line.takeoff_id)
 
         self.conn.execute(
             """
             INSERT INTO takeoff_lines (
+                line_id,
                 takeoff_id,
                 item_code,
+                mapping_id,
                 qty,
                 notes,
                 description_snapshot,
@@ -126,11 +172,13 @@ class SqliteTakeoffLineRepository(TakeoffLineRepository):
                 sort_order,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
             """,
             (
+                getattr(line, "line_id", None) or uuid4().hex,
                 line.takeoff_id,
                 line.item_code,
+                getattr(line, "mapping_id", None),
                 str(line.qty),
                 line.notes,
                 line.description_snapshot,
@@ -143,44 +191,26 @@ class SqliteTakeoffLineRepository(TakeoffLineRepository):
             ),
         )
         self.conn.commit()
-    
+
     def update_line(
         self,
         *,
-        takeoff_id: str,
-        item_code: str,
+        line_id: str | None = None,
+        takeoff_id: str | None = None,
+        item_code: str | None = None,
         qty: Decimal | None = None,
         stage: Stage | None = None,
         factor: Decimal | None = None,
         sort_order: int | None = None,
     ) -> None:
-        if not str(takeoff_id).strip():
-            raise InvalidInputError("takeoff_id cannot be empty")
-        if not str(item_code).strip():
-            raise InvalidInputError("item_code cannot be empty")
-
-        takeoff_row = self.conn.execute(
-            "SELECT is_locked FROM takeoffs WHERE takeoff_id = ?",
-            (takeoff_id,),
-        ).fetchone()
-        if takeoff_row is None:
-            raise InvalidInputError(f"Takeoff not found: {takeoff_id}")
-        if bool(int(takeoff_row["is_locked"])):
-            raise InvalidInputError(f"Takeoff is locked: {takeoff_id}")
-
-        row = self.conn.execute(
-            """
-            SELECT qty, stage, factor, sort_order
-            FROM takeoff_lines
-            WHERE takeoff_id = ? AND item_code = ?
-            """,
-            (takeoff_id, item_code),
-        ).fetchone()
-
-        if row is None:
-            raise InvalidInputError(
-                f"Takeoff line not found: takeoff_id={takeoff_id} item_code={item_code}"
-            )
+        row = self._resolve_line_row(
+            line_id=line_id,
+            takeoff_id=takeoff_id,
+            item_code=item_code,
+        )
+        resolved_line_id = str(row["line_id"])
+        resolved_takeoff_id = str(row["takeoff_id"])
+        self._ensure_takeoff_editable(takeoff_id=resolved_takeoff_id)
 
         new_qty = qty if qty is not None else Decimal(str(row["qty"]))
         new_stage = stage if stage is not None else Stage(str(row["stage"] or "final"))
@@ -202,25 +232,26 @@ class SqliteTakeoffLineRepository(TakeoffLineRepository):
                 factor = ?,
                 sort_order = ?,
                 updated_at = datetime('now')
-            WHERE takeoff_id = ? AND item_code = ?
+            WHERE line_id = ?
             """,
             (
                 str(new_qty),
                 new_stage.value,
                 str(new_factor),
                 int(new_sort_order),
-                takeoff_id,
-                item_code,
+                resolved_line_id,
             ),
         )
-        self.conn.commit()    
+        self.conn.commit()
 
     def list_for_takeoff(self, takeoff_id: str) -> tuple[TakeoffLineSnapshot, ...]:
         rows = self.conn.execute(
             """
             SELECT
+                line_id,
                 takeoff_id,
                 item_code,
+                mapping_id,
                 qty,
                 notes,
                 description_snapshot,
@@ -240,7 +271,8 @@ class SqliteTakeoffLineRepository(TakeoffLineRepository):
                     ELSE 99
                 END,
                 sort_order,
-                item_code
+                item_code,
+                line_id
             """,
             (takeoff_id,),
         ).fetchall()
@@ -256,6 +288,8 @@ class SqliteTakeoffLineRepository(TakeoffLineRepository):
                 details_snapshot=r["details_snapshot"],
                 unit_price_snapshot=Decimal(str(r["unit_price_snapshot"])),
                 taxable_snapshot=_bool(r["taxable_snapshot"]),
+                line_id=str(r["line_id"]),
+                mapping_id=r["mapping_id"],
             )
             extra_kwargs = dict(
                 stage=Stage(str(r["stage"])) if r["stage"] is not None else None,
@@ -268,32 +302,33 @@ class SqliteTakeoffLineRepository(TakeoffLineRepository):
                 out.append(TakeoffLineSnapshot(**base_kwargs))
 
         return tuple(out)
-    
-    def delete_line(self, *, takeoff_id: str, item_code: str) -> None:
-        if not str(takeoff_id).strip():
-            raise InvalidInputError("takeoff_id cannot be empty")
-        if not str(item_code).strip():
-            raise InvalidInputError("item_code cannot be empty")
 
-        takeoff_row = self.conn.execute(
-            "SELECT is_locked FROM takeoffs WHERE takeoff_id = ?",
-            (takeoff_id,),
-        ).fetchone()
-        if takeoff_row is None:
-            raise InvalidInputError(f"Takeoff not found: {takeoff_id}")
-        if bool(int(takeoff_row["is_locked"])):
-            raise InvalidInputError(f"Takeoff is locked: {takeoff_id}")
+    def delete_line(
+        self,
+        *,
+        line_id: str | None = None,
+        takeoff_id: str | None = None,
+        item_code: str | None = None,
+    ) -> None:
+        row = self._resolve_line_row(
+            line_id=line_id,
+            takeoff_id=takeoff_id,
+            item_code=item_code,
+        )
+        resolved_line_id = str(row["line_id"])
+        resolved_takeoff_id = str(row["takeoff_id"])
+        self._ensure_takeoff_editable(takeoff_id=resolved_takeoff_id)
 
         cur = self.conn.execute(
             """
             DELETE FROM takeoff_lines
-            WHERE takeoff_id = ? AND item_code = ?
+            WHERE line_id = ?
             """,
-            (takeoff_id, item_code),
+            (resolved_line_id,),
         )
         self.conn.commit()
 
         if cur.rowcount == 0:
             raise InvalidInputError(
-                f"Takeoff line not found: takeoff_id={takeoff_id} item_code={item_code}"
+                f"Takeoff line not found: line_id={resolved_line_id}"
             )

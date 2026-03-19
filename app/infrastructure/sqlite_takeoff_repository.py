@@ -29,8 +29,10 @@ class TakeoffVersionRecord:
 
 @dataclass(frozen=True)
 class TakeoffVersionLineSnapshot:
+    version_line_id: str | None
     version_id: str
     item_code: str
+    mapping_id: str | None
     qty: Decimal
     notes: str | None
     description_snapshot: str
@@ -204,7 +206,23 @@ class SqliteTakeoffRepository:
         for part in header:
             hash_builder.update(part.encode())
 
-        for r in sorted(rows, key=lambda x: x["item_code"]):
+        def _sort_key(row: dict[str, str]) -> tuple[str, ...]:
+            version_line_id = row.get("version_line_id")
+            if version_line_id:
+                return ("0", version_line_id)
+            return (
+                "1",
+                row["item_code"],
+                row.get("stage", ""),
+                row.get("sort_order", ""),
+                row.get("qty", ""),
+                row.get("factor", ""),
+                row.get("unit_price_snapshot", ""),
+                row.get("description_snapshot", "") or "",
+                row.get("notes", "") or "",
+            )
+
+        for r in sorted(rows, key=_sort_key):
             hash_builder.update(r["item_code"].encode())
             hash_builder.update(r["qty"].encode())
             hash_builder.update(r["unit_price_snapshot"].encode())
@@ -276,7 +294,9 @@ class SqliteTakeoffRepository:
             raw_rows = self.conn.execute(
                 """
                 SELECT
+                    line_id,
                     item_code,
+                    mapping_id,
                     qty,
                     notes,
                     description_snapshot,
@@ -296,7 +316,9 @@ class SqliteTakeoffRepository:
             for r in raw_rows:
                 rows.append(
                     {
+                        "line_id": str(r["line_id"]),
                         "item_code": str(r["item_code"]),
+                        "mapping_id": str(r["mapping_id"]) if r["mapping_id"] is not None else None,
                         "qty": str(Decimal(str(r["qty"]))),
                         "notes": str(r["notes"]) if r["notes"] is not None else None,
                         "description_snapshot": str(r["description_snapshot"]),
@@ -342,7 +364,7 @@ class SqliteTakeoffRepository:
                     str(tax_rate_snapshot),
                     str(valve_discount_snapshot),
                     integrity_hash,
-                    2,
+                    3,
                 ),
             )
 
@@ -350,8 +372,10 @@ class SqliteTakeoffRepository:
                 self.conn.execute(
                     """
                     INSERT INTO takeoff_version_lines (
+                        version_line_id,
                         version_id,
                         item_code,
+                        mapping_id,
                         qty,
                         notes,
                         description_snapshot,
@@ -363,11 +387,13 @@ class SqliteTakeoffRepository:
                         sort_order,
                         created_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                     """,
                     (
+                        uuid4().hex,
                         version_id,
                         str(r["item_code"]),
+                        r["mapping_id"],
                         str(r["qty"]),
                         r["notes"],
                         str(r["description_snapshot"]),
@@ -384,7 +410,9 @@ class SqliteTakeoffRepository:
             persisted_rows_raw = self.conn.execute(
                 """
                 SELECT
+                    version_line_id,
                     item_code,
+                    mapping_id,
                     qty,
                     notes,
                     description_snapshot,
@@ -402,7 +430,9 @@ class SqliteTakeoffRepository:
 
             persisted_rows = [
                 {
+                    "version_line_id": str(r["version_line_id"]),
                     "item_code": str(r["item_code"]),
+                    "mapping_id": str(r["mapping_id"]) if r["mapping_id"] is not None else None,
                     "qty": str(r["qty"]),
                     "notes": str(r["notes"]) if r["notes"] is not None else None,
                     "description_snapshot": str(r["description_snapshot"]),
@@ -527,8 +557,10 @@ class SqliteTakeoffRepository:
         rows = self.conn.execute(
             """
             SELECT
+                version_line_id,
                 version_id,
                 item_code,
+                mapping_id,
                 qty,
                 notes,
                 description_snapshot,
@@ -549,7 +581,8 @@ class SqliteTakeoffRepository:
                     ELSE 99
                 END,
                 sort_order,
-                item_code
+                item_code,
+                version_line_id
             """,
             (version_id,),
         ).fetchall()
@@ -558,8 +591,10 @@ class SqliteTakeoffRepository:
         for r in rows:
             out.append(
                 TakeoffVersionLineSnapshot(
+                    version_line_id=str(r["version_line_id"]),
                     version_id=str(r["version_id"]),
                     item_code=str(r["item_code"]),
+                    mapping_id=str(r["mapping_id"]) if r["mapping_id"] is not None else None,
                     qty=Decimal(str(r["qty"])),
                     notes=str(r["notes"]) if r["notes"] is not None else None,
                     description_snapshot=str(r["description_snapshot"]),
@@ -587,11 +622,13 @@ class SqliteTakeoffRepository:
 
         version = self.get_version(version_id=version_id)
 
-        if version.integrity_schema_version >= 2:
+        if version.integrity_schema_version >= 3:
             raw_rows = self.conn.execute(
                 """
                 SELECT
+                    version_line_id,
                     item_code,
+                    mapping_id,
                     qty,
                     notes,
                     description_snapshot,
@@ -609,7 +646,9 @@ class SqliteTakeoffRepository:
 
             rows = [
                 {
+                    "version_line_id": str(r["version_line_id"]),
                     "item_code": str(r["item_code"]),
+                    "mapping_id": str(r["mapping_id"]) if r["mapping_id"] is not None else None,
                     "qty": str(r["qty"]),
                     "notes": str(r["notes"]) if r["notes"] is not None else None,
                     "description_snapshot": str(r["description_snapshot"]),

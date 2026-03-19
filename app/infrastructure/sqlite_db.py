@@ -26,6 +26,138 @@ def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
     return any(str(r["name"]) == column for r in rows)
 
 
+def _rebuild_takeoff_lines_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE takeoff_lines_new (
+            line_id TEXT PRIMARY KEY,
+            takeoff_id TEXT NOT NULL,
+            item_code TEXT NOT NULL,
+            mapping_id TEXT NULL,
+            qty TEXT NOT NULL,
+            notes TEXT NULL,
+            description_snapshot TEXT NOT NULL,
+            details_snapshot TEXT NULL,
+            unit_price_snapshot TEXT NOT NULL,
+            taxable_snapshot INTEGER NOT NULL,
+            stage TEXT NOT NULL DEFAULT 'final',
+            factor TEXT NOT NULL DEFAULT '1.0',
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (takeoff_id) REFERENCES takeoffs(takeoff_id) ON DELETE CASCADE,
+            FOREIGN KEY (item_code) REFERENCES items(internal_item_code)
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        INSERT INTO takeoff_lines_new (
+            line_id,
+            takeoff_id,
+            item_code,
+            mapping_id,
+            qty,
+            notes,
+            description_snapshot,
+            details_snapshot,
+            unit_price_snapshot,
+            taxable_snapshot,
+            stage,
+            factor,
+            sort_order,
+            created_at,
+            updated_at
+        )
+        SELECT
+            lower(hex(randomblob(16))),
+            takeoff_id,
+            item_code,
+            NULL,
+            qty,
+            notes,
+            description_snapshot,
+            details_snapshot,
+            unit_price_snapshot,
+            taxable_snapshot,
+            COALESCE(stage, 'final'),
+            COALESCE(factor, '1.0'),
+            COALESCE(sort_order, 0),
+            COALESCE(created_at, datetime('now')),
+            COALESCE(updated_at, datetime('now'))
+        FROM takeoff_lines
+        """
+    )
+
+    conn.execute("DROP TABLE takeoff_lines")
+    conn.execute("ALTER TABLE takeoff_lines_new RENAME TO takeoff_lines")
+
+
+def _rebuild_takeoff_version_lines_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE takeoff_version_lines_new (
+            version_line_id TEXT PRIMARY KEY,
+            version_id TEXT NOT NULL,
+            item_code TEXT NOT NULL,
+            mapping_id TEXT NULL,
+            qty TEXT NOT NULL,
+            notes TEXT NULL,
+            description_snapshot TEXT NOT NULL,
+            details_snapshot TEXT NULL,
+            unit_price_snapshot TEXT NOT NULL,
+            taxable_snapshot INTEGER NOT NULL,
+            stage TEXT NOT NULL DEFAULT 'final',
+            factor TEXT NOT NULL DEFAULT '1.0',
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (version_id) REFERENCES takeoff_versions(version_id) ON DELETE CASCADE
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        INSERT INTO takeoff_version_lines_new (
+            version_line_id,
+            version_id,
+            item_code,
+            mapping_id,
+            qty,
+            notes,
+            description_snapshot,
+            details_snapshot,
+            unit_price_snapshot,
+            taxable_snapshot,
+            stage,
+            factor,
+            sort_order,
+            created_at
+        )
+        SELECT
+            lower(hex(randomblob(16))),
+            version_id,
+            item_code,
+            NULL,
+            qty,
+            notes,
+            description_snapshot,
+            details_snapshot,
+            unit_price_snapshot,
+            taxable_snapshot,
+            COALESCE(stage, 'final'),
+            COALESCE(factor, '1.0'),
+            COALESCE(sort_order, 0),
+            COALESCE(created_at, datetime('now'))
+        FROM takeoff_version_lines
+        """
+    )
+
+    conn.execute("DROP TABLE takeoff_version_lines")
+    conn.execute("ALTER TABLE takeoff_version_lines_new RENAME TO takeoff_version_lines")
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
     """Idempotent schema creation + additive migrations.
 
@@ -191,8 +323,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS takeoff_lines (
+            line_id TEXT PRIMARY KEY,
             takeoff_id TEXT NOT NULL,
             item_code TEXT NOT NULL,
+            mapping_id TEXT NULL,
             qty TEXT NOT NULL,
             notes TEXT NULL,
 
@@ -210,12 +344,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now')),
 
-            PRIMARY KEY (takeoff_id, item_code),
             FOREIGN KEY (takeoff_id) REFERENCES takeoffs(takeoff_id) ON DELETE CASCADE,
             FOREIGN KEY (item_code) REFERENCES items(internal_item_code)
         )
         """
     )
+
+    if not _has_column(conn, "takeoff_lines", "line_id"):
+        _rebuild_takeoff_lines_table(conn)
+    elif not _has_column(conn, "takeoff_lines", "mapping_id"):
+        conn.execute("ALTER TABLE takeoff_lines ADD COLUMN mapping_id TEXT NULL")
 
     # Additive migrations for takeoff_lines (older DBs)
     if not _has_column(conn, "takeoff_lines", "details_snapshot"):
@@ -233,6 +371,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
     # Backfill NULL stage on legacy DBs
     conn.execute("UPDATE takeoff_lines SET stage = 'final' WHERE stage IS NULL")
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_takeoff_lines_takeoff_id
+        ON takeoff_lines(takeoff_id)
+        """
+    )
 
     # -------------------------
     # Takeoff versions (immutable)
@@ -308,8 +453,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS takeoff_version_lines (
+            version_line_id TEXT PRIMARY KEY,
             version_id TEXT NOT NULL,
             item_code TEXT NOT NULL,
+            mapping_id TEXT NULL,
             qty TEXT NOT NULL,
             notes TEXT NULL,
 
@@ -326,11 +473,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
 
-            PRIMARY KEY (version_id, item_code),
             FOREIGN KEY (version_id) REFERENCES takeoff_versions(version_id) ON DELETE CASCADE
         )
         """
     )
+
+    if not _has_column(conn, "takeoff_version_lines", "version_line_id"):
+        _rebuild_takeoff_version_lines_table(conn)
+    elif not _has_column(conn, "takeoff_version_lines", "mapping_id"):
+        conn.execute("ALTER TABLE takeoff_version_lines ADD COLUMN mapping_id TEXT NULL")
 
     # Additive migrations for takeoff_version_lines (older DBs)
     if not _has_column(conn, "takeoff_version_lines", "qty"):
@@ -349,5 +500,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE takeoff_version_lines ADD COLUMN factor TEXT NOT NULL DEFAULT '1.0'")
     if not _has_column(conn, "takeoff_version_lines", "sort_order"):
         conn.execute("ALTER TABLE takeoff_version_lines ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_takeoff_version_lines_version_id
+        ON takeoff_version_lines(version_id)
+        """
+    )
 
     conn.commit()

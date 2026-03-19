@@ -22,3 +22,5 @@ class TakeoffLineSnapshot:
     stage: Stage | None = None
     factor: Decimal = Decimal("1.0")
     sort_order: int = 0
+    line_id: str | None = None
+    mapping_id: str | None = None
