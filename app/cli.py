@@ -29,8 +29,12 @@ from app.application.update_takeoff_line import UpdateTakeoffLine
 from app.application.inspect_takeoff import InspectTakeoff
 from app.application.summarize_project import SummarizeProject
 from app.application.generate_project_invoice import GenerateProjectInvoice
+from app.application.generate_takeoff_from_plan_reading import (
+    GenerateTakeoffFromPlanReading,
+)
 from app.config import AppConfig
 from app.domain.output_format import OutputFormat
+from app.domain.plan_reading_input import PlanReadingInput
 from app.domain.project import Project
 from app.domain.stage import Stage
 from app.domain.takeoff_line_snapshot import TakeoffLineSnapshot
@@ -41,9 +45,15 @@ from app.infrastructure.file_takeoff_repository import FileTakeoffRepository
 from app.infrastructure.renderer_registry import RendererRegistry
 from app.infrastructure.sqlite_db import SqliteDb
 from app.infrastructure.sqlite_item_repository import SqliteItemRepository
+from app.infrastructure.sqlite_project_fixture_override_repository import (
+    SqliteProjectFixtureOverrideRepository,
+)
 from app.infrastructure.sqlite_project_repository import SqliteProjectRepository
 from app.infrastructure.sqlite_takeoff_line_repository import SqliteTakeoffLineRepository
 from app.infrastructure.sqlite_takeoff_repository import SqliteTakeoffRepository
+from app.infrastructure.sqlite_template_fixture_mapping_repository import (
+    SqliteTemplateFixtureMappingRepository,
+)
 from app.infrastructure.sqlite_template_line_repository import SqliteTemplateLineRepository
 from app.infrastructure.sqlite_template_repository import SqliteTemplateRepository
 from app.infrastructure.takeoff_json_loader import TakeoffJsonLoader
@@ -66,6 +76,49 @@ def _parse_decimal(value: str, flag: str) -> Decimal:
         return Decimal(value)
     except Exception as e:
         raise SystemExit(f"Invalid {flag}: {value!r}") from e
+
+
+def _parse_non_negative_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except Exception as e:
+        raise argparse.ArgumentTypeError(f"expected integer, got {value!r}") from e
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be >= 0")
+    return parsed
+
+
+def _parse_non_negative_float(value: str) -> float:
+    try:
+        parsed = float(value)
+    except Exception as e:
+        raise argparse.ArgumentTypeError(f"expected number, got {value!r}") from e
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be >= 0")
+    return parsed
+
+
+def _add_plan_reading_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--stories", required=True, type=_parse_non_negative_int)
+    parser.add_argument("--kitchens", required=True, type=_parse_non_negative_int)
+    parser.add_argument("--garbage-disposals", required=True, type=_parse_non_negative_int)
+    parser.add_argument("--laundry-rooms", required=True, type=_parse_non_negative_int)
+    parser.add_argument("--lav-faucets", required=True, type=_parse_non_negative_int)
+    parser.add_argument("--toilets", required=True, type=_parse_non_negative_int)
+    parser.add_argument("--showers", required=True, type=_parse_non_negative_int)
+    parser.add_argument("--bathtubs", required=True, type=_parse_non_negative_int)
+    parser.add_argument("--half-baths", required=True, type=_parse_non_negative_int)
+    parser.add_argument("--double-bowl-vanities", required=True, type=_parse_non_negative_int)
+    parser.add_argument("--hose-bibbs", required=True, type=_parse_non_negative_int)
+    parser.add_argument("--ice-makers", required=True, type=_parse_non_negative_int)
+    parser.add_argument("--water-heater-tank-qty", required=True, type=_parse_non_negative_int)
+    parser.add_argument(
+        "--water-heater-tankless-qty",
+        required=True,
+        type=_parse_non_negative_int,
+    )
+    parser.add_argument("--sewer-distance-lf", required=True, type=_parse_non_negative_float)
+    parser.add_argument("--water-distance-lf", required=True, type=_parse_non_negative_float)
 
 
 def _validate_out_extension(fmt: OutputFormat, out: Path) -> None:
@@ -563,7 +616,9 @@ def _handle_takeoffs(args: argparse.Namespace, *, db_path: Path, config: AppConf
     try:
         item_repo = SqliteItemRepository(conn=conn)
         project_repo = SqliteProjectRepository(conn=conn)
+        project_fixture_override_repo = SqliteProjectFixtureOverrideRepository(conn=conn)
         template_repo = SqliteTemplateRepository(conn=conn)
+        template_fixture_mapping_repo = SqliteTemplateFixtureMappingRepository(conn=conn)
         template_line_repo = SqliteTemplateLineRepository(conn=conn)
         takeoff_repo = SqliteTakeoffRepository(conn=conn)
         takeoff_line_repo = SqliteTakeoffLineRepository(conn=conn)
@@ -590,6 +645,53 @@ def _handle_takeoffs(args: argparse.Namespace, *, db_path: Path, config: AppConf
 
             print(
                 f"TAKEOFF seeded id={takeoff_id} "
+                f"project={args.project} template={args.template}"
+            )
+            return 0
+
+        if args.takeoffs_cmd == "generate-from-plan":
+            tax_rate: Decimal | None = None
+            if args.tax_rate:
+                tax_rate = _parse_decimal(args.tax_rate, "--tax-rate")
+
+            use_case = GenerateTakeoffFromPlanReading(
+                project_repo=project_repo,
+                template_repo=template_repo,
+                template_fixture_mapping_repo=template_fixture_mapping_repo,
+                project_fixture_override_repo=project_fixture_override_repo,
+                item_repo=item_repo,
+                takeoff_repo=takeoff_repo,
+                takeoff_line_repo=takeoff_line_repo,
+            )
+
+            plan = PlanReadingInput(
+                stories=args.stories,
+                kitchens=args.kitchens,
+                garbage_disposals=args.garbage_disposals,
+                laundry_rooms=args.laundry_rooms,
+                lav_faucets=args.lav_faucets,
+                toilets=args.toilets,
+                showers=args.showers,
+                bathtubs=args.bathtubs,
+                half_baths=args.half_baths,
+                double_bowl_vanities=args.double_bowl_vanities,
+                hose_bibbs=args.hose_bibbs,
+                ice_makers=args.ice_makers,
+                water_heater_tank_qty=args.water_heater_tank_qty,
+                water_heater_tankless_qty=args.water_heater_tankless_qty,
+                sewer_distance_lf=args.sewer_distance_lf,
+                water_distance_lf=args.water_distance_lf,
+            )
+
+            takeoff_id = use_case(
+                project_code=args.project,
+                template_code=args.template,
+                plan=plan,
+                tax_rate_override=tax_rate,
+            )
+
+            print(
+                f"TAKEOFF generated id={takeoff_id} "
                 f"project={args.project} template={args.template}"
             )
             return 0
@@ -1216,6 +1318,12 @@ def main(argv: list[str] | None = None) -> int:
         seed.add_argument("--project", required=True)
         seed.add_argument("--template", required=True)
         seed.add_argument("--tax-rate", required=False)
+
+        generate_from_plan = takeoffs_sub.add_parser("generate-from-plan")
+        generate_from_plan.add_argument("--project", required=True)
+        generate_from_plan.add_argument("--template", required=True)
+        generate_from_plan.add_argument("--tax-rate", required=False)
+        _add_plan_reading_args(generate_from_plan)
 
         lst = takeoffs_sub.add_parser("list")
         lst.add_argument("--project", required=True)
