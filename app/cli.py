@@ -969,6 +969,11 @@ def _handle_takeoffs(args: argparse.Namespace, *, db_path: Path, config: AppConf
                 version_b=args.v2,
             )
 
+            if result.warnings:
+                for warning in result.warnings:
+                    print(f"WARNING | {warning}")
+                print()
+
             visible = result.lines if args.all else tuple(
                 ln for ln in result.lines if ln.change != "unchanged"
             )

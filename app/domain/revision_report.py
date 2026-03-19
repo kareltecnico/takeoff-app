@@ -33,6 +33,7 @@ class RevisionReport:
     after_discount_b: Decimal
     after_discount_delta: Decimal
     lines: tuple[RevisionReportLine, ...]
+    warnings: tuple[str, ...] = ()
 
     def to_text(self) -> str:
         parts: list[str] = []
@@ -70,6 +71,12 @@ class RevisionReport:
             f"delta={self.after_discount_delta:.2f}"
         )
         parts.append("")
+
+        if self.warnings:
+            parts.append("WARNINGS")
+            for warning in self.warnings:
+                parts.append(warning)
+            parts.append("")
 
         for section in ("added", "removed", "modified"):
             section_lines = [ln for ln in self.lines if ln.section == section]

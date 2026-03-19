@@ -41,8 +41,14 @@ class GenerateRevisionReport:
             else:
                 old = ln.old
                 new = ln.new
+                item_code_text = (
+                    f"item_code: {old.item_code} -> {new.item_code} | "
+                    if old.item_code != new.item_code
+                    else ""
+                )
                 text = (
                     f"{ln.item_code} | "
+                    f"{item_code_text}"
                     f"qty: {old.qty} -> {new.qty} | "
                     f"stage: {old.stage} -> {new.stage} | "
                     f"factor: {old.factor} -> {new.factor} | "
@@ -80,6 +86,7 @@ class GenerateRevisionReport:
             after_discount_b=diff.financial_b.total_after_discount,
             after_discount_delta=delta.total_after_discount,
             lines=tuple(lines),
+            warnings=diff.warnings,
         )
 
     def _line_subtotal(self, state: VersionLineState | None) -> Decimal:

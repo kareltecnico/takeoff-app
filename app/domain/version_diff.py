@@ -10,6 +10,9 @@ ChangeType = Literal["added", "removed", "modified", "unchanged"]
 
 @dataclass(frozen=True)
 class VersionLineState:
+    comparison_key: str
+    comparison_key_kind: str
+    mapping_id: str | None
     item_code: str
     qty: Decimal
     stage: str
@@ -19,6 +22,8 @@ class VersionLineState:
 
 @dataclass(frozen=True)
 class VersionLineDiff:
+    comparison_key: str
+    comparison_key_kind: str
     item_code: str
     change: ChangeType
     old: VersionLineState | None
@@ -41,6 +46,8 @@ class VersionDiffResult:
     lines: tuple[VersionLineDiff, ...]
     financial_a: VersionFinancialState
     financial_b: VersionFinancialState
+    guardrail_triggered: bool = False
+    warnings: tuple[str, ...] = ()
 
     def has_changes(self) -> bool:
         for ln in self.lines:

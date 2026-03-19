@@ -25,6 +25,69 @@ class DiffTakeoffVersions:
 
     takeoff_repo: object
 
+    def _line_identity(self, ln: object) -> tuple[str, str]:
+        mapping_id = getattr(ln, "mapping_id", None)
+        if mapping_id:
+            return (str(mapping_id), "mapping_id")
+        return (str(ln.item_code), "legacy_item_code")
+
+    def _build_line_maps(
+        self,
+        *,
+        lines: tuple[object, ...],
+        version_label: str,
+    ) -> tuple[dict[str, VersionLineState], set[str], list[str]]:
+        mapped: dict[str, VersionLineState] = {}
+        legacy_counts: dict[str, int] = {}
+
+        for ln in lines:
+            comparison_key, key_kind = self._line_identity(ln)
+            if key_kind == "mapping_id":
+                mapped[comparison_key] = VersionLineState(
+                    comparison_key=comparison_key,
+                    comparison_key_kind=key_kind,
+                    mapping_id=getattr(ln, "mapping_id", None),
+                    item_code=ln.item_code,
+                    qty=ln.qty,
+                    stage=ln.stage,
+                    factor=ln.factor,
+                    unit_price=ln.unit_price_snapshot,
+                )
+            else:
+                legacy_counts[comparison_key] = legacy_counts.get(comparison_key, 0) + 1
+
+        warnings: list[str] = []
+        duplicate_legacy_keys = sorted(
+            item_code
+            for item_code, count in legacy_counts.items()
+            if count > 1
+        )
+        if duplicate_legacy_keys:
+            joined = ", ".join(duplicate_legacy_keys)
+            warnings.append(
+                f"{version_label}: structural diff is not trustworthy for duplicate legacy "
+                f"item_code fallback keys without mapping_id ({joined})"
+            )
+
+        for ln in lines:
+            comparison_key, key_kind = self._line_identity(ln)
+            if key_kind != "legacy_item_code":
+                continue
+            if legacy_counts.get(comparison_key, 0) != 1:
+                continue
+            mapped[comparison_key] = VersionLineState(
+                comparison_key=comparison_key,
+                comparison_key_kind=key_kind,
+                mapping_id=None,
+                item_code=ln.item_code,
+                qty=ln.qty,
+                stage=ln.stage,
+                factor=ln.factor,
+                unit_price=ln.unit_price_snapshot,
+            )
+
+        return mapped, set(duplicate_legacy_keys), warnings
+
     def __call__(self, *, version_a: str, version_b: str) -> VersionDiffResult:
         a_lines = self.takeoff_repo.list_version_lines(version_id=version_a)
         b_lines = self.takeoff_repo.list_version_lines(version_id=version_b)
@@ -32,26 +95,21 @@ class DiffTakeoffVersions:
         a_version = self.takeoff_repo.get_version(version_id=version_a)
         b_version = self.takeoff_repo.get_version(version_id=version_b)
 
-        a_map: dict[str, VersionLineState] = {}
-        b_map: dict[str, VersionLineState] = {}
+        a_map, a_duplicated_legacy_keys, warnings_a = self._build_line_maps(
+            lines=a_lines,
+            version_label=f"version_a={version_a}",
+        )
+        b_map, b_duplicated_legacy_keys, warnings_b = self._build_line_maps(
+            lines=b_lines,
+            version_label=f"version_b={version_b}",
+        )
+        warnings = tuple(warnings_a + warnings_b)
+        guardrail_triggered = bool(warnings)
 
-        for ln in a_lines:
-            a_map[ln.item_code] = VersionLineState(
-                item_code=ln.item_code,
-                qty=ln.qty,
-                stage=ln.stage,
-                factor=ln.factor,
-                unit_price=ln.unit_price_snapshot,
-            )
-
-        for ln in b_lines:
-            b_map[ln.item_code] = VersionLineState(
-                item_code=ln.item_code,
-                qty=ln.qty,
-                stage=ln.stage,
-                factor=ln.factor,
-                unit_price=ln.unit_price_snapshot,
-            )
+        ambiguous_keys = a_duplicated_legacy_keys | b_duplicated_legacy_keys
+        for key in ambiguous_keys:
+            a_map.pop(key, None)
+            b_map.pop(key, None)
 
         all_items = sorted(set(a_map.keys()) | set(b_map.keys()))
         diffs: list[VersionLineDiff] = []
@@ -59,6 +117,9 @@ class DiffTakeoffVersions:
         for item in all_items:
             a = a_map.get(item)
             b = b_map.get(item)
+            effective = b if b is not None else a
+            if effective is None:
+                continue
 
             if a is None and b is not None:
                 change = "added"
@@ -77,7 +138,9 @@ class DiffTakeoffVersions:
 
             diffs.append(
                 VersionLineDiff(
-                    item_code=item,
+                    comparison_key=item,
+                    comparison_key_kind=effective.comparison_key_kind,
+                    item_code=effective.item_code,
                     change=change,
                     old=a,
                     new=b,
@@ -98,6 +161,8 @@ class DiffTakeoffVersions:
                 tax_rate=b_version.tax_rate_snapshot,
                 valve_discount=b_version.valve_discount_snapshot,
             ),
+            guardrail_triggered=guardrail_triggered,
+            warnings=warnings,
         )
 
     def _build_financial_state(self, *, a_lines: tuple[object, ...], tax_rate, valve_discount) -> VersionFinancialState:
