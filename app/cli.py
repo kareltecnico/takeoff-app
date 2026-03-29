@@ -5,15 +5,18 @@ from decimal import Decimal
 from pathlib import Path
 import json
 import re
+from uuid import uuid4
 
 from app.application.build_sample_takeoff import BuildSampleTakeoff
 from app.application.errors import InvalidInputError
 from app.application.generate_revision_report import GenerateRevisionReport
 from app.application.export_revision_bundle import ExportRevisionBundle
+from app.application.import_items_from_csv import ImportItemsFromCsv
 from app.application.input_sources import TakeoffInputSource
 from app.application.inputs.factory_takeoff_input import FactoryTakeoffInput
 from app.application.inputs.json_takeoff_input import JsonTakeoffInput
 from app.application.inputs.repo_takeoff_input import RepoTakeoffInput
+from app.application.items_catalog import ItemsCatalog
 from app.application.render_takeoff import RenderTakeoff
 from app.application.render_takeoff_from_snapshot import (
     RenderTakeoffFromSnapshot,
@@ -34,6 +37,12 @@ from app.application.generate_takeoff_from_plan_reading import (
 )
 from app.config import AppConfig
 from app.domain.output_format import OutputFormat
+from app.domain.fixture_mapping import (
+    FixtureQuantityRef,
+    FixtureQuantitySourceKind,
+    ProjectFixtureOverride,
+    TemplateFixtureMappingRule,
+)
 from app.domain.plan_reading_input import PlanReadingInput
 from app.domain.project import Project
 from app.domain.stage import Stage
@@ -98,6 +107,55 @@ def _parse_non_negative_float(value: str) -> float:
     return parsed
 
 
+def _parse_bool_flag(value: str, flag: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in {"true", "t", "1", "yes", "y", "on"}:
+        return True
+    if normalized in {"false", "f", "0", "no", "n", "off"}:
+        return False
+    raise SystemExit(f"Invalid {flag}: {value!r} (use true/false)")
+
+
+def _validate_item_code(code: str, flag: str = "--code") -> str:
+    normalized = code.strip()
+    if not normalized:
+        raise InvalidInputError(f"{flag} cannot be empty")
+    if not re.fullmatch(r"[A-Z0-9_]+", normalized):
+        raise InvalidInputError(
+            f"{flag} must contain only A-Z, 0-9, and _"
+        )
+    return normalized
+
+
+def _validate_non_empty_text(value: str | None, flag: str) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        raise InvalidInputError(f"{flag} cannot be empty")
+    return normalized
+
+
+def _parse_source_kind(value: str) -> FixtureQuantitySourceKind:
+    try:
+        return FixtureQuantitySourceKind(value)
+    except ValueError as e:
+        raise InvalidInputError(f"Invalid --source-kind: {value!r}") from e
+
+
+def _effective_notes(
+    *,
+    current: str | None,
+    value: str | None,
+    clear: bool,
+) -> str | None:
+    if clear:
+        return None
+    if value is not None:
+        return value
+    return current
+
+
 def _add_plan_reading_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--stories", required=True, type=_parse_non_negative_int)
     parser.add_argument("--kitchens", required=True, type=_parse_non_negative_int)
@@ -119,6 +177,36 @@ def _add_plan_reading_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--sewer-distance-lf", required=True, type=_parse_non_negative_float)
     parser.add_argument("--water-distance-lf", required=True, type=_parse_non_negative_float)
+
+
+def _build_fixture_quantity_ref(
+    *,
+    source_kind: FixtureQuantitySourceKind,
+    source_name: str | None,
+    constant_qty: Decimal | None,
+) -> FixtureQuantityRef:
+    final_source_name = source_name.strip() if source_name is not None else None
+    if final_source_name == "":
+        raise InvalidInputError("--source-name cannot be empty")
+
+    if source_kind == FixtureQuantitySourceKind.CONSTANT:
+        if constant_qty is None:
+            raise InvalidInputError("Final source_kind=constant requires --constant-qty")
+        return FixtureQuantityRef(
+            source_kind=source_kind,
+            source_name=None,
+            constant_qty=constant_qty,
+        )
+
+    if final_source_name is None:
+        raise InvalidInputError(
+            f"Final source_kind={source_kind.value} requires --source-name"
+        )
+    return FixtureQuantityRef(
+        source_kind=source_kind,
+        source_name=final_source_name,
+        constant_qty=None,
+    )
 
 
 def _validate_out_extension(fmt: OutputFormat, out: Path) -> None:
@@ -191,6 +279,336 @@ def _validate_save_args(args: argparse.Namespace) -> None:
             raise SystemExit("--input-path can only be used with --input json")
 
 
+
+
+def _handle_items(args: argparse.Namespace, *, db_path: Path) -> int:
+    conn = SqliteDb(path=db_path).connect()
+    try:
+        repo = SqliteItemRepository(conn=conn)
+        catalog = ItemsCatalog(repo=repo)
+
+        if args.items_cmd == "import":
+            report = ImportItemsFromCsv(repo=repo)(csv_path=Path(args.csv))
+            print("ITEM IMPORT")
+            print(f"inserted={report.inserted}")
+            print(f"updated={report.updated}")
+            print(f"skipped={report.skipped}")
+            print(f"conflicted={report.conflicted}")
+            for issue in report.skipped_rows:
+                code_txt = issue.code or "-"
+                print(f"SKIPPED row={issue.row_number} code={code_txt} reason={issue.reason}")
+            for issue in report.conflicted_rows:
+                code_txt = issue.code or "-"
+                print(f"CONFLICT row={issue.row_number} code={code_txt} reason={issue.reason}")
+            return 0
+
+        if args.items_cmd == "add":
+            code = _validate_item_code(args.code)
+            description = _validate_non_empty_text(args.description, "--description")
+            item_number = _validate_non_empty_text(args.item_number, "--item-number")
+            details = _validate_non_empty_text(args.details, "--details")
+            catalog.add(
+                code=code,
+                description=description or "",
+                unit_price=_parse_decimal(args.unit_price, "--unit-price"),
+                taxable=_parse_bool_flag(args.taxable, "--taxable"),
+                item_number=item_number,
+                details=details,
+                is_active=not args.inactive,
+            )
+            print(f"ITEM saved code={code}")
+            return 0
+
+        if args.items_cmd == "list":
+            rows = catalog.list(include_inactive=bool(args.include_inactive))
+            for item in rows:
+                active = "active" if item.is_active else "inactive"
+                print(
+                    f"{item.code} | item_number={item.item_number} | "
+                    f"description={item.description} | details={item.details} | "
+                    f"unit_price={item.unit_price} | taxable={item.taxable} | {active}"
+                )
+            return 0
+
+        if args.items_cmd == "get":
+            item = catalog.get(code=_validate_item_code(args.code))
+            active = "active" if item.is_active else "inactive"
+            print(
+                f"{item.code} | item_number={item.item_number} | "
+                f"description={item.description} | details={item.details} | "
+                f"unit_price={item.unit_price} | taxable={item.taxable} | {active}"
+            )
+            return 0
+
+        if args.items_cmd == "update":
+            code = _validate_item_code(args.code)
+            description = _validate_non_empty_text(args.description, "--description")
+            item_number = _validate_non_empty_text(args.item_number, "--item-number")
+            details = _validate_non_empty_text(args.details, "--details")
+            taxable = (
+                _parse_bool_flag(args.taxable, "--taxable")
+                if args.taxable is not None
+                else None
+            )
+            unit_price = (
+                _parse_decimal(args.unit_price, "--unit-price")
+                if args.unit_price is not None
+                else None
+            )
+            catalog.update(
+                code=code,
+                description=description,
+                unit_price=unit_price,
+                taxable=taxable,
+                item_number=item_number,
+                details=details,
+                clear_item_number=bool(args.clear_item_number),
+                clear_details=bool(args.clear_details),
+            )
+            print(f"ITEM updated code={code}")
+            return 0
+
+        if args.items_cmd == "activate":
+            code = _validate_item_code(args.code)
+            catalog.update(code=code, is_active=True)
+            print(f"ITEM activated code={code}")
+            return 0
+
+        if args.items_cmd == "deactivate":
+            code = _validate_item_code(args.code)
+            catalog.update(code=code, is_active=False)
+            print(f"ITEM deactivated code={code}")
+            return 0
+
+        raise AssertionError("Unreachable: unknown items command")
+    finally:
+        conn.close()
+
+
+def _handle_fixture_mappings(args: argparse.Namespace, *, db_path: Path) -> int:
+    conn = SqliteDb(path=db_path).connect()
+    try:
+        repo = SqliteTemplateFixtureMappingRepository(conn=conn)
+
+        if args.fm_cmd == "add":
+            mapping_id = (
+                _validate_non_empty_text(args.mapping_id, "--mapping-id")
+                if args.mapping_id is not None
+                else uuid4().hex
+            )
+            source_kind = _parse_source_kind(args.source_kind)
+            quantity_ref = _build_fixture_quantity_ref(
+                source_kind=source_kind,
+                source_name=args.source_name,
+                constant_qty=(
+                    _parse_decimal(args.constant_qty, "--constant-qty")
+                    if args.constant_qty is not None
+                    else None
+                ),
+            )
+            repo.add(
+                TemplateFixtureMappingRule(
+                    mapping_id=mapping_id or "",
+                    template_code=_validate_non_empty_text(args.template, "--template") or "",
+                    quantity_ref=quantity_ref,
+                    item_code=_validate_item_code(args.item, "--item"),
+                    qty_multiplier=_parse_decimal(args.qty_multiplier, "--qty-multiplier"),
+                    stage=Stage(args.stage),
+                    factor=_parse_decimal(args.factor, "--factor"),
+                    sort_order=int(args.sort_order),
+                    notes=_validate_non_empty_text(args.notes, "--notes"),
+                    is_active=not args.inactive,
+                )
+            )
+            print(f"FIXTURE MAPPING saved mapping_id={mapping_id}")
+            return 0
+
+        if args.fm_cmd == "list":
+            rows = repo.list_for_template(
+                _validate_non_empty_text(args.template, "--template") or "",
+                include_inactive=bool(args.include_inactive),
+            )
+            for rule in rows:
+                ref = rule.quantity_ref
+                print(
+                    f"{rule.mapping_id} | template={rule.template_code} | "
+                    f"source_kind={ref.source_kind.value} | source_name={ref.source_name} | "
+                    f"constant_qty={ref.constant_qty} | item={rule.item_code} | "
+                    f"qty_multiplier={rule.qty_multiplier} | stage={rule.stage.value} | "
+                    f"factor={rule.factor} | sort_order={rule.sort_order} | "
+                    f"notes={rule.notes} | active={rule.is_active}"
+                )
+            return 0
+
+        if args.fm_cmd == "show":
+            rule = repo.get(_validate_non_empty_text(args.mapping_id, "--mapping-id") or "")
+            ref = rule.quantity_ref
+            print(
+                f"{rule.mapping_id} | template={rule.template_code} | "
+                f"source_kind={ref.source_kind.value} | source_name={ref.source_name} | "
+                f"constant_qty={ref.constant_qty} | item={rule.item_code} | "
+                f"qty_multiplier={rule.qty_multiplier} | stage={rule.stage.value} | "
+                f"factor={rule.factor} | sort_order={rule.sort_order} | "
+                f"notes={rule.notes} | active={rule.is_active}"
+            )
+            return 0
+
+        if args.fm_cmd == "update":
+            current = repo.get(_validate_non_empty_text(args.mapping_id, "--mapping-id") or "")
+            final_source_kind = (
+                _parse_source_kind(args.source_kind)
+                if args.source_kind is not None
+                else current.quantity_ref.source_kind
+            )
+            source_name_value = (
+                _validate_non_empty_text(args.source_name, "--source-name")
+                if args.source_name is not None
+                else current.quantity_ref.source_name
+            )
+            constant_qty_value = (
+                _parse_decimal(args.constant_qty, "--constant-qty")
+                if args.constant_qty is not None
+                else current.quantity_ref.constant_qty
+            )
+            quantity_ref = _build_fixture_quantity_ref(
+                source_kind=final_source_kind,
+                source_name=source_name_value,
+                constant_qty=constant_qty_value,
+            )
+            repo.upsert(
+                TemplateFixtureMappingRule(
+                    mapping_id=current.mapping_id,
+                    template_code=current.template_code,
+                    quantity_ref=quantity_ref,
+                    item_code=(
+                        _validate_item_code(args.item, "--item")
+                        if args.item is not None
+                        else current.item_code
+                    ),
+                    qty_multiplier=(
+                        _parse_decimal(args.qty_multiplier, "--qty-multiplier")
+                        if args.qty_multiplier is not None
+                        else current.qty_multiplier
+                    ),
+                    stage=Stage(args.stage) if args.stage is not None else current.stage,
+                    factor=(
+                        _parse_decimal(args.factor, "--factor")
+                        if args.factor is not None
+                        else current.factor
+                    ),
+                    sort_order=int(args.sort_order) if args.sort_order is not None else current.sort_order,
+                    notes=_effective_notes(
+                        current=current.notes,
+                        value=_validate_non_empty_text(args.notes, "--notes"),
+                        clear=bool(args.clear_notes),
+                    ),
+                    is_active=current.is_active,
+                )
+            )
+            print(f"FIXTURE MAPPING updated mapping_id={current.mapping_id}")
+            return 0
+
+        if args.fm_cmd == "activate":
+            mapping_id = _validate_non_empty_text(args.mapping_id, "--mapping-id") or ""
+            repo.set_active(mapping_id, is_active=True)
+            print(f"FIXTURE MAPPING activated mapping_id={mapping_id}")
+            return 0
+
+        if args.fm_cmd == "deactivate":
+            mapping_id = _validate_non_empty_text(args.mapping_id, "--mapping-id") or ""
+            repo.set_active(mapping_id, is_active=False)
+            print(f"FIXTURE MAPPING deactivated mapping_id={mapping_id}")
+            return 0
+
+        raise AssertionError("Unreachable: unknown fixture-mappings command")
+    finally:
+        conn.close()
+
+
+def _handle_project_overrides(args: argparse.Namespace, *, db_path: Path) -> int:
+    conn = SqliteDb(path=db_path).connect()
+    try:
+        repo = SqliteProjectFixtureOverrideRepository(conn=conn)
+
+        if args.po_cmd == "set":
+            project_code = _validate_non_empty_text(args.project, "--project") or ""
+            mapping_id = _validate_non_empty_text(args.mapping_id, "--mapping-id") or ""
+            try:
+                current = repo.get(project_code=project_code, mapping_id=mapping_id)
+            except InvalidInputError:
+                current = ProjectFixtureOverride(project_code=project_code, mapping_id=mapping_id)
+
+            if args.clear_item and args.item is not None:
+                raise InvalidInputError("Use either --item or --clear-item, not both")
+            if args.clear_notes and args.notes is not None:
+                raise InvalidInputError("Use either --notes or --clear-notes, not both")
+            if args.disable and args.item is not None:
+                raise InvalidInputError("--disable cannot be combined with --item")
+
+            final_item = (
+                None
+                if args.clear_item
+                else _validate_item_code(args.item, "--item")
+                if args.item is not None
+                else current.item_code_override
+            )
+            final_notes = _effective_notes(
+                current=current.notes_override,
+                value=_validate_non_empty_text(args.notes, "--notes"),
+                clear=bool(args.clear_notes),
+            )
+            final_disabled = True if args.disable else current.is_disabled
+
+            if not final_disabled and final_item is None and final_notes is None:
+                raise InvalidInputError(
+                    "Final project override state is empty; use delete instead"
+                )
+
+            repo.upsert(
+                ProjectFixtureOverride(
+                    project_code=project_code,
+                    mapping_id=mapping_id,
+                    is_disabled=final_disabled,
+                    item_code_override=final_item,
+                    notes_override=final_notes,
+                )
+            )
+            print(f"PROJECT OVERRIDE saved project={project_code} mapping_id={mapping_id}")
+            return 0
+
+        if args.po_cmd == "list":
+            project_code = _validate_non_empty_text(args.project, "--project") or ""
+            rows = repo.list_for_project(project_code)
+            for row in rows:
+                print(
+                    f"{row.project_code} | mapping_id={row.mapping_id} | "
+                    f"disabled={row.is_disabled} | item={row.item_code_override} | "
+                    f"notes={row.notes_override}"
+                )
+            return 0
+
+        if args.po_cmd == "show":
+            row = repo.get(
+                project_code=_validate_non_empty_text(args.project, "--project") or "",
+                mapping_id=_validate_non_empty_text(args.mapping_id, "--mapping-id") or "",
+            )
+            print(
+                f"{row.project_code} | mapping_id={row.mapping_id} | "
+                f"disabled={row.is_disabled} | item={row.item_code_override} | "
+                f"notes={row.notes_override}"
+            )
+            return 0
+
+        if args.po_cmd == "delete":
+            project_code = _validate_non_empty_text(args.project, "--project") or ""
+            mapping_id = _validate_non_empty_text(args.mapping_id, "--mapping-id") or ""
+            repo.delete(project_code=project_code, mapping_id=mapping_id)
+            print(f"PROJECT OVERRIDE deleted project={project_code} mapping_id={mapping_id}")
+            return 0
+
+        raise AssertionError("Unreachable: unknown project-overrides command")
+    finally:
+        conn.close()
 
 
 def _handle_projects(args: argparse.Namespace, *, db_path: Path) -> int:
@@ -828,23 +1246,37 @@ def _handle_takeoffs(args: argparse.Namespace, *, db_path: Path, config: AppConf
             return 0
 
         if args.takeoffs_cmd == "update-line":
+            target_kwargs: dict[str, object] = {}
+            if args.line_id is not None:
+                target_kwargs["line_id"] = args.line_id
+                target_label = f"line_id={args.line_id}"
+            else:
+                target_kwargs["item_code"] = args.item
+                target_label = f"item={args.item}"
             UpdateTakeoffLine(repo=takeoff_line_repo)(
                 takeoff_id=args.id,
-                item_code=args.item,
+                **target_kwargs,
                 qty=Decimal(args.qty) if args.qty else None,
                 stage=Stage(args.stage) if args.stage else None,
                 factor=Decimal(args.factor) if args.factor else None,
                 sort_order=int(args.sort_order) if args.sort_order else None,
             )
-            print(f"LINE updated takeoff={args.id} item={args.item}")
+            print(f"LINE updated takeoff={args.id} {target_label}")
             return 0
 
         if args.takeoffs_cmd == "delete-line":
+            target_kwargs = {}
+            if args.line_id is not None:
+                target_kwargs["line_id"] = args.line_id
+                target_label = f"line_id={args.line_id}"
+            else:
+                target_kwargs["item_code"] = args.item
+                target_label = f"item={args.item}"
             DeleteTakeoffLine(repo=takeoff_line_repo)(
                 takeoff_id=args.id,
-                item_code=args.item,
+                **target_kwargs,
             )
-            print(f"LINE deleted takeoff={args.id} item={args.item}")
+            print(f"LINE deleted takeoff={args.id} {target_label}")
             return 0
 
         if args.takeoffs_cmd == "lines":
@@ -858,9 +1290,11 @@ def _handle_takeoffs(args: argparse.Namespace, *, db_path: Path, config: AppConf
                 factor_txt = getattr(ln, "factor", "")
                 sort_txt = getattr(ln, "sort_order", "")
                 print(
-                    f"{ln.item_code} | qty={ln.qty} | stage={stage_txt} | "
-                    f"factor={factor_txt} | sort_order={sort_txt} | {taxable} | "
-                    f"unit_price={ln.unit_price_snapshot} | {ln.description_snapshot}"
+                    f"line_id={getattr(ln, 'line_id', None)} | "
+                    f"mapping_id={getattr(ln, 'mapping_id', None)} | "
+                    f"item_code={ln.item_code} | qty={ln.qty} | stage={stage_txt} | "
+                    f"factor={factor_txt} | sort_order={sort_txt} | "
+                    f"description={ln.description_snapshot}"
                 )
             return 0
 
@@ -1229,6 +1663,118 @@ def main(argv: list[str] | None = None) -> int:
         render.add_argument("--tax-rate", required=False)
 
         # -------------------------
+        # items (SQLite)
+        # -------------------------
+        items = sub.add_parser("items")
+        items_sub = items.add_subparsers(dest="items_cmd", required=True)
+
+        items_import = items_sub.add_parser("import")
+        items_import.add_argument("--csv", required=True)
+
+        items_add = items_sub.add_parser("add")
+        items_add.add_argument("--code", required=True)
+        items_add.add_argument("--description", required=True)
+        items_add.add_argument("--unit-price", required=True)
+        items_add.add_argument("--taxable", required=True)
+        items_add.add_argument("--item-number", default=None)
+        items_add.add_argument("--details", default=None)
+        items_add.add_argument("--inactive", action="store_true")
+
+        items_list = items_sub.add_parser("list")
+        items_list.add_argument("--include-inactive", action="store_true")
+
+        items_get = items_sub.add_parser("get")
+        items_get.add_argument("--code", required=True)
+
+        items_update = items_sub.add_parser("update")
+        items_update.add_argument("--code", required=True)
+        items_update.add_argument("--description", default=None)
+        items_update.add_argument("--unit-price", default=None)
+        items_update.add_argument("--taxable", default=None)
+        items_update.add_argument("--item-number", default=None)
+        items_update.add_argument("--details", default=None)
+        items_update.add_argument("--clear-item-number", action="store_true")
+        items_update.add_argument("--clear-details", action="store_true")
+
+        items_activate = items_sub.add_parser("activate")
+        items_activate.add_argument("--code", required=True)
+
+        items_deactivate = items_sub.add_parser("deactivate")
+        items_deactivate.add_argument("--code", required=True)
+
+        # -------------------------
+        # fixture-mappings (SQLite)
+        # -------------------------
+        fixture_mappings = sub.add_parser("fixture-mappings")
+        fixture_mappings_sub = fixture_mappings.add_subparsers(dest="fm_cmd", required=True)
+
+        fm_add = fixture_mappings_sub.add_parser("add")
+        fm_add.add_argument("--template", required=True)
+        fm_add.add_argument("--source-kind", choices=["derived", "plan", "constant"], required=True)
+        fm_add.add_argument("--source-name", default=None)
+        fm_add.add_argument("--constant-qty", default=None)
+        fm_add.add_argument("--item", required=True)
+        fm_add.add_argument("--qty-multiplier", default="1.0")
+        fm_add.add_argument("--stage", choices=["ground", "topout", "final"], default="final")
+        fm_add.add_argument("--factor", default="1.0")
+        fm_add.add_argument("--sort-order", default="0")
+        fm_add.add_argument("--notes", default=None)
+        fm_add.add_argument("--inactive", action="store_true")
+        fm_add.add_argument("--mapping-id", default=None)
+
+        fm_list = fixture_mappings_sub.add_parser("list")
+        fm_list.add_argument("--template", required=True)
+        fm_list.add_argument("--include-inactive", action="store_true")
+
+        fm_show = fixture_mappings_sub.add_parser("show")
+        fm_show.add_argument("--mapping-id", required=True)
+
+        fm_update = fixture_mappings_sub.add_parser("update")
+        fm_update.add_argument("--mapping-id", required=True)
+        fm_update.add_argument("--source-kind", choices=["derived", "plan", "constant"], default=None)
+        fm_update.add_argument("--source-name", default=None)
+        fm_update.add_argument("--constant-qty", default=None)
+        fm_update.add_argument("--item", default=None)
+        fm_update.add_argument("--qty-multiplier", default=None)
+        fm_update.add_argument("--stage", choices=["ground", "topout", "final"], default=None)
+        fm_update.add_argument("--factor", default=None)
+        fm_update.add_argument("--sort-order", default=None)
+        fm_update.add_argument("--notes", default=None)
+        fm_update.add_argument("--clear-notes", action="store_true")
+
+        fm_activate = fixture_mappings_sub.add_parser("activate")
+        fm_activate.add_argument("--mapping-id", required=True)
+
+        fm_deactivate = fixture_mappings_sub.add_parser("deactivate")
+        fm_deactivate.add_argument("--mapping-id", required=True)
+
+        # -------------------------
+        # project-overrides (SQLite)
+        # -------------------------
+        project_overrides = sub.add_parser("project-overrides")
+        project_overrides_sub = project_overrides.add_subparsers(dest="po_cmd", required=True)
+
+        po_set = project_overrides_sub.add_parser("set")
+        po_set.add_argument("--project", required=True)
+        po_set.add_argument("--mapping-id", required=True)
+        po_set.add_argument("--disable", action="store_true")
+        po_set.add_argument("--item", default=None)
+        po_set.add_argument("--notes", default=None)
+        po_set.add_argument("--clear-item", action="store_true")
+        po_set.add_argument("--clear-notes", action="store_true")
+
+        po_list = project_overrides_sub.add_parser("list")
+        po_list.add_argument("--project", required=True)
+
+        po_show = project_overrides_sub.add_parser("show")
+        po_show.add_argument("--project", required=True)
+        po_show.add_argument("--mapping-id", required=True)
+
+        po_delete = project_overrides_sub.add_parser("delete")
+        po_delete.add_argument("--project", required=True)
+        po_delete.add_argument("--mapping-id", required=True)
+
+        # -------------------------
         # projects (SQLite)
         # -------------------------
         projects = sub.add_parser("projects")
@@ -1339,7 +1885,9 @@ def main(argv: list[str] | None = None) -> int:
 
         upd = takeoffs_sub.add_parser("update-line")
         upd.add_argument("--id", required=True)
-        upd.add_argument("--item", required=True)
+        upd_target = upd.add_mutually_exclusive_group(required=True)
+        upd_target.add_argument("--line-id", required=False)
+        upd_target.add_argument("--item", required=False)
         upd.add_argument("--qty", required=False)
         upd.add_argument("--stage", choices=["ground", "topout", "final"], required=False)
         upd.add_argument("--factor", required=False)
@@ -1356,7 +1904,9 @@ def main(argv: list[str] | None = None) -> int:
 
         del_ln = takeoffs_sub.add_parser("delete-line")
         del_ln.add_argument("--id", required=True)
-        del_ln.add_argument("--item", required=True)
+        del_target = del_ln.add_mutually_exclusive_group(required=True)
+        del_target.add_argument("--line-id", required=False)
+        del_target.add_argument("--item", required=False)
 
         revise = takeoffs_sub.add_parser("revise")
         revise.add_argument("--id", required=True)
@@ -1471,6 +2021,24 @@ def main(argv: list[str] | None = None) -> int:
 
             print(f"{fmt.value.upper()} generated at: {rendered_path.resolve()}")
             return 0
+
+        # -------------------------
+        # ITEMS (SQLite)
+        # -------------------------
+        if args.cmd == "items":
+            return _handle_items(args, db_path=Path(args.db_path))
+
+        # -------------------------
+        # FIXTURE MAPPINGS (SQLite)
+        # -------------------------
+        if args.cmd == "fixture-mappings":
+            return _handle_fixture_mappings(args, db_path=Path(args.db_path))
+
+        # -------------------------
+        # PROJECT OVERRIDES (SQLite)
+        # -------------------------
+        if args.cmd == "project-overrides":
+            return _handle_project_overrides(args, db_path=Path(args.db_path))
 
         # -------------------------
         # PROJECTS (SQLite)

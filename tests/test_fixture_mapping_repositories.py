@@ -214,6 +214,92 @@ def test_template_fixture_mapping_repository_enforces_unique_mapping_id(tmp_path
         conn.close()
 
 
+def test_template_fixture_mapping_repository_upsert_preserves_mapping_id_and_updates_fields(
+    tmp_path: Path,
+) -> None:
+    conn = _make_conn(tmp_path)
+    try:
+        _seed_item(conn, "ITEM-001")
+        _seed_item(conn, "ITEM-002")
+        _seed_template(conn, "TH_DEFAULT")
+        repo = SqliteTemplateFixtureMappingRepository(conn=conn)
+
+        repo.add(
+            TemplateFixtureMappingRule(
+                mapping_id="map-stable",
+                template_code="TH_DEFAULT",
+                quantity_ref=FixtureQuantityRef(
+                    source_kind=FixtureQuantitySourceKind.DERIVED,
+                    source_name="water_points",
+                ),
+                item_code="ITEM-001",
+                stage=Stage.GROUND,
+                factor=Decimal("0.30"),
+                sort_order=10,
+                notes="Original",
+            )
+        )
+
+        repo.upsert(
+            TemplateFixtureMappingRule(
+                mapping_id="map-stable",
+                template_code="TH_DEFAULT",
+                quantity_ref=FixtureQuantityRef(
+                    source_kind=FixtureQuantitySourceKind.CONSTANT,
+                    constant_qty=Decimal("2"),
+                ),
+                item_code="ITEM-002",
+                stage=Stage.FINAL,
+                factor=Decimal("1.0"),
+                sort_order=25,
+                notes="Updated",
+            )
+        )
+
+        rule = repo.get("map-stable")
+        assert rule.mapping_id == "map-stable"
+        assert rule.quantity_ref.source_kind == FixtureQuantitySourceKind.CONSTANT
+        assert rule.quantity_ref.constant_qty == Decimal("2")
+        assert rule.quantity_ref.source_name is None
+        assert rule.item_code == "ITEM-002"
+        assert rule.stage == Stage.FINAL
+        assert rule.sort_order == 25
+        assert rule.notes == "Updated"
+    finally:
+        conn.close()
+
+
+def test_template_fixture_mapping_repository_can_activate_and_deactivate(tmp_path: Path) -> None:
+    conn = _make_conn(tmp_path)
+    try:
+        _seed_item(conn, "ITEM-001")
+        _seed_template(conn, "TH_DEFAULT")
+        repo = SqliteTemplateFixtureMappingRepository(conn=conn)
+
+        repo.add(
+            TemplateFixtureMappingRule(
+                mapping_id="map-active-toggle",
+                template_code="TH_DEFAULT",
+                quantity_ref=FixtureQuantityRef(
+                    source_kind=FixtureQuantitySourceKind.DERIVED,
+                    source_name="water_points",
+                ),
+                item_code="ITEM-001",
+                stage=Stage.GROUND,
+            )
+        )
+
+        repo.set_active("map-active-toggle", is_active=False)
+        assert repo.get("map-active-toggle").is_active is False
+        assert repo.list_for_template("TH_DEFAULT") == ()
+
+        repo.set_active("map-active-toggle", is_active=True)
+        assert repo.get("map-active-toggle").is_active is True
+        assert [r.mapping_id for r in repo.list_for_template("TH_DEFAULT")] == ["map-active-toggle"]
+    finally:
+        conn.close()
+
+
 def test_project_fixture_override_repository_add_get_list(tmp_path: Path) -> None:
     conn = _make_conn(tmp_path)
     try:
@@ -352,5 +438,86 @@ def test_project_fixture_override_repository_enforces_unique_project_mapping_pai
                 )
             )
 
+    finally:
+        conn.close()
+
+
+def test_project_fixture_override_repository_upsert_updates_existing_pair(tmp_path: Path) -> None:
+    conn = _make_conn(tmp_path)
+    try:
+        _seed_item(conn, "ITEM-001")
+        _seed_item(conn, "ITEM-002")
+        _seed_template(conn, "TH_DEFAULT")
+        _seed_project(conn, "PROJ-001")
+
+        SqliteTemplateFixtureMappingRepository(conn=conn).add(
+            TemplateFixtureMappingRule(
+                mapping_id="map-001",
+                template_code="TH_DEFAULT",
+                quantity_ref=FixtureQuantityRef(
+                    source_kind=FixtureQuantitySourceKind.DERIVED,
+                    source_name="water_points",
+                ),
+                item_code="ITEM-001",
+                stage=Stage.GROUND,
+            )
+        )
+
+        repo = SqliteProjectFixtureOverrideRepository(conn=conn)
+        repo.add(
+            ProjectFixtureOverride(
+                project_code="PROJ-001",
+                mapping_id="map-001",
+                notes_override="First",
+            )
+        )
+        repo.upsert(
+            ProjectFixtureOverride(
+                project_code="PROJ-001",
+                mapping_id="map-001",
+                is_disabled=True,
+                item_code_override=None,
+                notes_override="Updated",
+            )
+        )
+
+        override = repo.get(project_code="PROJ-001", mapping_id="map-001")
+        assert override.is_disabled is True
+        assert override.notes_override == "Updated"
+    finally:
+        conn.close()
+
+
+def test_project_fixture_override_repository_delete_removes_override(tmp_path: Path) -> None:
+    conn = _make_conn(tmp_path)
+    try:
+        _seed_item(conn, "ITEM-001")
+        _seed_template(conn, "TH_DEFAULT")
+        _seed_project(conn, "PROJ-001")
+
+        SqliteTemplateFixtureMappingRepository(conn=conn).add(
+            TemplateFixtureMappingRule(
+                mapping_id="map-001",
+                template_code="TH_DEFAULT",
+                quantity_ref=FixtureQuantityRef(
+                    source_kind=FixtureQuantitySourceKind.DERIVED,
+                    source_name="water_points",
+                ),
+                item_code="ITEM-001",
+                stage=Stage.GROUND,
+            )
+        )
+
+        repo = SqliteProjectFixtureOverrideRepository(conn=conn)
+        repo.add(
+            ProjectFixtureOverride(
+                project_code="PROJ-001",
+                mapping_id="map-001",
+                notes_override="To be removed",
+            )
+        )
+
+        repo.delete(project_code="PROJ-001", mapping_id="map-001")
+        assert repo.list_for_project("PROJ-001") == ()
     finally:
         conn.close()

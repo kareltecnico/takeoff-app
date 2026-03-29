@@ -4,7 +4,13 @@ version = "0.1.0"
 description = "Local Take-Off app for Leza's Plumbing (Streamlit + SQLite + ReportLab)"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "fastapi>=0.135.2,<0.136",
+    "httpx>=0.28.1,<0.29",
+    "itsdangerous>=2.2.0,<3",
+    "starlette>=1.0.0,<1.1",
+    "uvicorn>=0.42.0,<0.43",
+]
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

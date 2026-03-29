@@ -27,6 +27,39 @@
 - Diff/report redesign using `mapping_id`
 - CLI command for plan-driven takeoff generation
 
+## v1.x — Backend/API + Frontend MVP (Implemented Checkpoint)
+- Frontend MVP specification documented in [FrontendMVP.md](./FrontendMVP.md)
+- HTTP API bridge documented in [ApiMVP.md](./ApiMVP.md)
+- FastAPI HTTP bridge implemented over existing application/use-case logic
+- Simple cookie-session auth implemented with exactly two roles:
+  - Editor
+  - Viewer
+- Official template selection for new takeoffs:
+  - `TH_STANDARD`
+  - `VILLA_1331`
+  - `VILLA_STANDARD`
+  - `SF_GENERIC`
+- Legacy/provisional templates such as `TH_DEFAULT` stay out of normal baseline-selection UI
+- Frontend slices completed:
+  - login/session bootstrap
+  - protected routing and role gating
+  - projects list
+  - create/generate takeoff flow
+  - current takeoff detail
+  - editor-only CURRENT line edit/delete
+  - version history/detail and snapshot flow
+  - export actions from current and version detail
+- Item catalog/data model updates completed:
+  - normalized approved baseline catalog
+  - item category support in backend/data model
+  - wrong legacy pedestal item `41FSPP0001` deactivated for future use
+- Current known caveats:
+  - create/generate item selectors now use the real catalog by category, but selected items do not yet drive backend generation
+  - water-points override is still preview-only
+  - premium/extra items and item creation modal are still deferred
+  - export responses may still return a server-local file path rather than a dedicated browser download endpoint
+  - Template Admin remains deferred in the frontend
+
 ## v1.1 — Pricing policies for active project updates
 Goal: reduce manual work when item prices change.
 - Price lists with effective dates
@@ -46,25 +79,16 @@ Goal: reduce manual work when item prices change.
 - Extract fixture counts, tubs, etc. using AI
 - Human review and corrections before generating take-off
 
-## Future — Access Control (Role-based)
-Goal: prevent accidental edits while allowing operational visibility.
+## Future — Access Control Expansion
+MVP role-based access is now approved in [FrontendMVP.md](./FrontendMVP.md).
 
-Planned roles:
+Current MVP roles:
 
-Editor / Admin
-- Create projects
-- Modify templates
-- Create and edit take-offs
-- Create snapshots
-- Export revision bundles
+- Editor
+- Viewer
 
-Viewer / Read‑only
-- Inspect projects
-- View take-offs
-- View snapshots
-- Export reports
+Possible future expansion beyond MVP:
 
-Notes:
-- Intended for small team usage (owner + management + purchasing).
-- Helps prevent accidental modification of production data.
-- Authentication mechanism TBD (local users or simple credentials).
+- broader admin/user management
+- self-service password recovery
+- more granular permissions

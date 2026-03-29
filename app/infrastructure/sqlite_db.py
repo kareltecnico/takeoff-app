@@ -175,6 +175,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
             lennar_item_number TEXT NULL,
             description1 TEXT NOT NULL,
             description2 TEXT NULL,
+            category TEXT NULL,
             unit_price TEXT NOT NULL,
             default_taxable INTEGER NOT NULL,
             is_active INTEGER NOT NULL DEFAULT 1,
@@ -183,6 +184,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
         )
         """
     )
+
+    if not _has_column(conn, "items", "category"):
+        conn.execute("ALTER TABLE items ADD COLUMN category TEXT NULL")
 
     conn.execute(
         """
@@ -195,6 +199,21 @@ def _migrate(conn: sqlite3.Connection) -> None:
             status TEXT NOT NULL DEFAULT 'in_course',
             is_active INTEGER NOT NULL DEFAULT 1,
             valve_discount TEXT NOT NULL DEFAULT '0.00',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            user_id TEXT PRIMARY KEY,
+            username TEXT NOT NULL UNIQUE,
+            display_name TEXT NOT NULL,
+            role TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            is_active INTEGER NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         )

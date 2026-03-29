@@ -31,13 +31,22 @@ class SqliteTakeoffLineRepository(TakeoffLineRepository):
 
     def _ensure_takeoff_editable(self, *, takeoff_id: str) -> None:
         takeoff_row = self.conn.execute(
-            "SELECT is_locked FROM takeoffs WHERE takeoff_id = ?",
+            """
+            SELECT t.is_locked, p.is_active AS project_is_active
+            FROM takeoffs t
+            JOIN projects p ON p.project_code = t.project_code
+            WHERE t.takeoff_id = ?
+            """,
             (takeoff_id,),
         ).fetchone()
         if takeoff_row is None:
             raise InvalidInputError(f"Takeoff not found: {takeoff_id}")
         if bool(int(takeoff_row["is_locked"])):
             raise InvalidInputError(f"Takeoff is locked: {takeoff_id}")
+        if not _bool(takeoff_row["project_is_active"]):
+            raise InvalidInputError(
+                f"Project is closed; current takeoff cannot be edited: {takeoff_id}"
+            )
 
     def _resolve_line_row(
         self,
@@ -83,7 +92,8 @@ class SqliteTakeoffLineRepository(TakeoffLineRepository):
             )
         if len(rows) > 1:
             raise InvalidInputError(
-                "Multiple takeoff lines match this item_code; line_id is required "
+                "Multiple takeoff lines match this item_code; run "
+                f"`takeoffs lines --id {takeoff_id}` and retry with --line-id "
                 f"(takeoff_id={takeoff_id} item_code={item_code})"
             )
         return rows[0]

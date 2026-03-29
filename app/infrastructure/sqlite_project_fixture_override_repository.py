@@ -28,11 +28,14 @@ def _bool(value: object) -> bool:
 class SqliteProjectFixtureOverrideRepository(ProjectFixtureOverrideRepository):
     conn: sqlite3.Connection
 
-    def add(self, override: ProjectFixtureOverride) -> None:
+    def _validate_override(self, override: ProjectFixtureOverride) -> None:
         if not override.project_code.strip():
             raise InvalidInputError("ProjectFixtureOverride.project_code cannot be empty")
         if not override.mapping_id.strip():
             raise InvalidInputError("ProjectFixtureOverride.mapping_id cannot be empty")
+
+    def add(self, override: ProjectFixtureOverride) -> None:
+        self._validate_override(override)
 
         try:
             self.conn.execute(
@@ -46,6 +49,43 @@ class SqliteProjectFixtureOverrideRepository(ProjectFixtureOverrideRepository):
                     updated_at
                 )
                 VALUES (?, ?, ?, ?, ?, datetime('now'))
+                """,
+                (
+                    override.project_code,
+                    override.mapping_id,
+                    _b(override.is_disabled),
+                    override.item_code_override,
+                    override.notes_override,
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise InvalidInputError(
+                "Project fixture override constraint failed "
+                f"(project_code={override.project_code!r}, mapping_id={override.mapping_id!r})"
+            ) from exc
+
+        self.conn.commit()
+
+    def upsert(self, override: ProjectFixtureOverride) -> None:
+        self._validate_override(override)
+
+        try:
+            self.conn.execute(
+                """
+                INSERT INTO project_fixture_overrides (
+                    project_code,
+                    mapping_id,
+                    is_disabled,
+                    item_code_override,
+                    notes_override,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, datetime('now'))
+                ON CONFLICT(project_code, mapping_id) DO UPDATE SET
+                    is_disabled=excluded.is_disabled,
+                    item_code_override=excluded.item_code_override,
+                    notes_override=excluded.notes_override,
+                    updated_at=datetime('now')
                 """,
                 (
                     override.project_code,
@@ -117,3 +157,17 @@ class SqliteProjectFixtureOverrideRepository(ProjectFixtureOverrideRepository):
             )
             for row in rows
         )
+
+    def delete(self, *, project_code: str, mapping_id: str) -> None:
+        cur = self.conn.execute(
+            """
+            DELETE FROM project_fixture_overrides
+            WHERE project_code = ? AND mapping_id = ?
+            """,
+            (project_code, mapping_id),
+        )
+        self.conn.commit()
+        if cur.rowcount == 0:
+            raise InvalidInputError(
+                f"Project fixture override not found: {project_code} / {mapping_id}"
+            )

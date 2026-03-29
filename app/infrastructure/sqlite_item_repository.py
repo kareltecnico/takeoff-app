@@ -39,16 +39,18 @@ class SqliteItemRepository(ItemRepository):
                 lennar_item_number,
                 description1,
                 description2,
+                category,
                 unit_price,
                 default_taxable,
                 is_active,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
             ON CONFLICT(internal_item_code) DO UPDATE SET
                 lennar_item_number=excluded.lennar_item_number,
                 description1=excluded.description1,
                 description2=excluded.description2,
+                category=excluded.category,
                 unit_price=excluded.unit_price,
                 default_taxable=excluded.default_taxable,
                 is_active=excluded.is_active,
@@ -59,6 +61,7 @@ class SqliteItemRepository(ItemRepository):
                 item.item_number,
                 item.description,
                 item.details,
+                item.category,
                 str(item.unit_price),
                 _b(item.taxable),
                 _b(item.is_active),
@@ -69,7 +72,7 @@ class SqliteItemRepository(ItemRepository):
     def get(self, code: str) -> Item:
         row = self.conn.execute(
             """
-            SELECT internal_item_code, lennar_item_number, description1, description2,
+            SELECT internal_item_code, lennar_item_number, description1, description2, category,
                    unit_price, default_taxable, is_active
             FROM items
             WHERE internal_item_code = ?
@@ -88,13 +91,14 @@ class SqliteItemRepository(ItemRepository):
             unit_price=Decimal(str(row["unit_price"])),
             taxable=_bool(row["default_taxable"]),
             is_active=_bool(row["is_active"]),
+            category=row["category"],
         )
 
     def list(self, *, include_inactive: bool = False) -> tuple[Item, ...]:
         if include_inactive:
             rows = self.conn.execute(
                 """
-                SELECT internal_item_code, lennar_item_number, description1, description2,
+                SELECT internal_item_code, lennar_item_number, description1, description2, category,
                        unit_price, default_taxable, is_active
                 FROM items
                 ORDER BY internal_item_code
@@ -103,7 +107,7 @@ class SqliteItemRepository(ItemRepository):
         else:
             rows = self.conn.execute(
                 """
-                SELECT internal_item_code, lennar_item_number, description1, description2,
+                SELECT internal_item_code, lennar_item_number, description1, description2, category,
                        unit_price, default_taxable, is_active
                 FROM items
                 WHERE is_active = 1
@@ -122,6 +126,7 @@ class SqliteItemRepository(ItemRepository):
                     unit_price=Decimal(str(row["unit_price"])),
                     taxable=_bool(row["default_taxable"]),
                     is_active=_bool(row["is_active"]),
+                    category=row["category"],
                 )
             )
         return tuple(out)

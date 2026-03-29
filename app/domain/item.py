@@ -16,3 +16,4 @@ class Item:
     unit_price: Decimal
     taxable: bool
     is_active: bool = True
+    category: str | None = None

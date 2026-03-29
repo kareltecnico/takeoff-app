@@ -34,7 +34,7 @@ def _bool(value: object) -> bool:
 class SqliteTemplateFixtureMappingRepository(TemplateFixtureMappingRepository):
     conn: sqlite3.Connection
 
-    def add(self, rule: TemplateFixtureMappingRule) -> None:
+    def _validate_rule(self, rule: TemplateFixtureMappingRule) -> None:
         if not rule.mapping_id.strip():
             raise InvalidInputError("TemplateFixtureMappingRule.mapping_id cannot be empty")
         if not rule.template_code.strip():
@@ -54,9 +54,16 @@ class SqliteTemplateFixtureMappingRepository(TemplateFixtureMappingRepository):
         if ref.source_kind == FixtureQuantitySourceKind.CONSTANT:
             if ref.constant_qty is None:
                 raise InvalidInputError("Constant quantity refs require constant_qty")
+            if ref.source_name is not None:
+                raise InvalidInputError("Constant quantity refs cannot keep source_name")
         else:
             if not ref.source_name:
                 raise InvalidInputError("Non-constant quantity refs require source_name")
+            if ref.constant_qty is not None:
+                raise InvalidInputError("Non-constant quantity refs cannot keep constant_qty")
+
+    def add(self, rule: TemplateFixtureMappingRule) -> None:
+        self._validate_rule(rule)
 
         try:
             self.conn.execute(
@@ -77,6 +84,68 @@ class SqliteTemplateFixtureMappingRepository(TemplateFixtureMappingRepository):
                     updated_at
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                """,
+                (
+                    rule.mapping_id,
+                    rule.template_code,
+                    rule.quantity_ref.source_kind.value,
+                    rule.quantity_ref.source_name,
+                    str(rule.quantity_ref.constant_qty)
+                    if rule.quantity_ref.constant_qty is not None
+                    else None,
+                    rule.item_code,
+                    str(rule.qty_multiplier),
+                    rule.stage.value,
+                    str(rule.factor),
+                    int(rule.sort_order),
+                    rule.notes,
+                    _b(rule.is_active),
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise InvalidInputError(
+                "Template fixture mapping constraint failed "
+                f"(mapping_id={rule.mapping_id!r}, template={rule.template_code!r}, "
+                f"item={rule.item_code!r})"
+            ) from exc
+
+        self.conn.commit()
+
+    def upsert(self, rule: TemplateFixtureMappingRule) -> None:
+        self._validate_rule(rule)
+
+        try:
+            self.conn.execute(
+                """
+                INSERT INTO template_fixture_mappings (
+                    mapping_id,
+                    template_code,
+                    source_kind,
+                    source_name,
+                    constant_qty,
+                    item_code,
+                    qty_multiplier,
+                    stage,
+                    factor,
+                    sort_order,
+                    notes,
+                    is_active,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                ON CONFLICT(mapping_id) DO UPDATE SET
+                    template_code=excluded.template_code,
+                    source_kind=excluded.source_kind,
+                    source_name=excluded.source_name,
+                    constant_qty=excluded.constant_qty,
+                    item_code=excluded.item_code,
+                    qty_multiplier=excluded.qty_multiplier,
+                    stage=excluded.stage,
+                    factor=excluded.factor,
+                    sort_order=excluded.sort_order,
+                    notes=excluded.notes,
+                    is_active=excluded.is_active,
+                    updated_at=datetime('now')
                 """,
                 (
                     rule.mapping_id,
@@ -184,6 +253,18 @@ class SqliteTemplateFixtureMappingRepository(TemplateFixtureMappingRepository):
             ).fetchall()
 
         return tuple(self._row_to_rule(row) for row in rows)
+
+    def set_active(self, mapping_id: str, *, is_active: bool) -> None:
+        _ = self.get(mapping_id)
+        self.conn.execute(
+            """
+            UPDATE template_fixture_mappings
+            SET is_active = ?, updated_at = datetime('now')
+            WHERE mapping_id = ?
+            """,
+            (_b(is_active), mapping_id),
+        )
+        self.conn.commit()
 
     def _row_to_rule(self, row: sqlite3.Row) -> TemplateFixtureMappingRule:
         constant_qty = (
