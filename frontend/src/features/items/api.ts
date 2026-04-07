@@ -1,4 +1,4 @@
-import { useQueries } from '@tanstack/react-query'
+import { useQueries, useQuery } from '@tanstack/react-query'
 
 import { apiRequest } from '../../lib/api'
 
@@ -36,4 +36,14 @@ export function useItemsByCategories(categories: string[]) {
     isError: queries.some((query) => query.isError),
     error: queries.find((query) => query.error)?.error ?? null,
   }
+}
+
+export function useItemsCatalog() {
+  return useQuery({
+    queryKey: ['items', 'all'],
+    queryFn: async () => {
+      const response = await apiRequest<{ items: CatalogItem[] }>('/api/v1/items')
+      return response.items
+    },
+  })
 }

@@ -1,4 +1,5 @@
 export type StructureType = 'TH' | 'Villas' | 'SFH' | 'Custom'
+export type Stage = 'ground' | 'topout' | 'final'
 
 export type BaselineOption = {
   id: string
@@ -8,9 +9,24 @@ export type BaselineOption = {
   templateCode: 'TH_STANDARD' | 'VILLA_1331' | 'VILLA_STANDARD' | 'SF_GENERIC'
 }
 
+export type PlanQuantityKey =
+  | 'kitchens'
+  | 'garbage_disposals'
+  | 'lav_faucets'
+  | 'toilets'
+  | 'showers'
+  | 'bathtubs'
+  | 'half_baths'
+  | 'double_bowl_vanities'
+  | 'hose_bibbs'
+  | 'ice_makers'
+  | 'water_heater_tank_qty'
+  | 'water_heater_tankless_qty'
+
 export type StandardItemKey =
   | 'kitchenFaucet'
   | 'garbageDisposal'
+  | 'installDishwasher'
   | 'lavFaucet'
   | 'toilet'
   | 'showerTrim'
@@ -25,6 +41,15 @@ export type StandardItemKey =
 export type StandardItemOption = {
   code: string
   label: string
+}
+
+export type StandardRowDefinition = {
+  key: StandardItemKey
+  label: string
+  quantityKey: PlanQuantityKey
+  category: string
+  stage: Stage
+  helpText?: string
 }
 
 export const STRUCTURE_OPTIONS: Array<{
@@ -85,9 +110,93 @@ export const BASELINE_OPTIONS: BaselineOption[] = [
   },
 ]
 
+export const STANDARD_ITEM_ROWS: StandardRowDefinition[] = [
+  {
+    key: 'kitchenFaucet',
+    label: 'Kitchen Faucet',
+    quantityKey: 'kitchens',
+    category: 'Kitchen Faucet',
+    stage: 'final',
+  },
+  {
+    key: 'garbageDisposal',
+    label: 'Garbage Disposal',
+    quantityKey: 'garbage_disposals',
+    category: 'Garbage Disposal',
+    stage: 'final',
+  },
+  {
+    key: 'installDishwasher',
+    label: 'Install Dishwasher',
+    quantityKey: 'kitchens',
+    category: 'Install Dishwasher',
+    stage: 'final',
+    helpText: 'Visible explicitly in the wizard. Current backend generation still derives this from kitchen count.',
+  },
+  {
+    key: 'iceMaker',
+    label: 'Ice Maker',
+    quantityKey: 'ice_makers',
+    category: 'Ice Maker',
+    stage: 'topout',
+    helpText: 'Defaults to 1 because the primary kitchen usually carries one refrigerator water connection.',
+  },
+  {
+    key: 'lavFaucet',
+    label: 'Lavatory Faucet',
+    quantityKey: 'lav_faucets',
+    category: 'Lav Faucet',
+    stage: 'final',
+  },
+  {
+    key: 'toilet',
+    label: 'Toilets',
+    quantityKey: 'toilets',
+    category: 'Toilet',
+    stage: 'final',
+  },
+  {
+    key: 'showerTrim',
+    label: 'Shower Trim',
+    quantityKey: 'showers',
+    category: 'Shower Trim',
+    stage: 'final',
+  },
+  {
+    key: 'tubShowerTrim',
+    label: 'Tub & Shower Trim',
+    quantityKey: 'bathtubs',
+    category: 'Tub Shower Trim',
+    stage: 'final',
+  },
+  {
+    key: 'bathTub',
+    label: 'Bathtub',
+    quantityKey: 'bathtubs',
+    category: 'Bathtub',
+    stage: 'topout',
+  },
+  {
+    key: 'pedestal',
+    label: 'Pedestal',
+    quantityKey: 'half_baths',
+    category: 'Pedestal',
+    stage: 'final',
+    helpText: 'Use as a suggestion, not a hard rule. The wizard can hint when the fixture mix looks like a half-bath pattern.',
+  },
+  {
+    key: 'hoseBibb',
+    label: 'Hose Bibbs',
+    quantityKey: 'hose_bibbs',
+    category: 'Hose Bibb',
+    stage: 'topout',
+  },
+]
+
 export const STANDARD_ITEM_OPTIONS: Record<StandardItemKey, StandardItemOption[]> = {
   kitchenFaucet: [{ code: 'XPLBFMKF0032', label: 'Kitchen Faucet' }],
   garbageDisposal: [{ code: 'XPLBFGD00006', label: 'Garbage Disposal' }],
+  installDishwasher: [{ code: 'LW50L80550', label: 'Install Dishwasher' }],
   lavFaucet: [{ code: 'XPLBFMLF0003', label: 'Lav Faucet' }],
   toilet: [{ code: 'XPLBF0TC0022', label: 'Toilet' }],
   showerTrim: [{ code: 'XPLBFMST0148', label: 'Shower Trim' }],
@@ -107,6 +216,7 @@ export const BASELINE_DEFAULT_ITEMS: Record<
   TH_STANDARD: {
     kitchenFaucet: 'XPLBFMKF0032',
     garbageDisposal: 'XPLBFGD00006',
+    installDishwasher: 'LW50L80550',
     lavFaucet: 'XPLBFMLF0003',
     toilet: 'XPLBF0TC0022',
     showerTrim: 'XPLBFMST0148',
@@ -121,6 +231,7 @@ export const BASELINE_DEFAULT_ITEMS: Record<
   VILLA_1331: {
     kitchenFaucet: 'XPLBFMKF0032',
     garbageDisposal: 'XPLBFGD00006',
+    installDishwasher: 'LW50L80550',
     lavFaucet: 'XPLBFMLF0003',
     toilet: 'XPLBF0TC0022',
     showerTrim: 'XPLBFMST0148',
@@ -135,6 +246,7 @@ export const BASELINE_DEFAULT_ITEMS: Record<
   VILLA_STANDARD: {
     kitchenFaucet: 'XPLBFMKF0032',
     garbageDisposal: 'XPLBFGD00006',
+    installDishwasher: 'LW50L80550',
     lavFaucet: 'XPLBFMLF0003',
     toilet: 'XPLBF0TC0022',
     showerTrim: 'XPLBFMST0148',
@@ -149,6 +261,7 @@ export const BASELINE_DEFAULT_ITEMS: Record<
   SF_GENERIC: {
     kitchenFaucet: 'XPLBFMKF0032',
     garbageDisposal: 'XPLBFGD00006',
+    installDishwasher: 'LW50L80550',
     lavFaucet: 'XPLBFMLF0003',
     toilet: 'XPLBF0TC0022',
     showerTrim: 'XPLBFMST0148',
@@ -161,6 +274,44 @@ export const BASELINE_DEFAULT_ITEMS: Record<
     tanklessWaterHeater: 'FW50M10226',
   },
 }
+
+export const PREVIEW_ITEM_CATEGORIES = [
+  ...new Set([
+    ...STANDARD_ITEM_ROWS.map((row) => row.category),
+    'Per Fixture Material',
+    'Per Fixture Labor',
+    'Double Bowl Material',
+    'Double Bowl Labor',
+    'Sewer Line Material',
+    'Sewer Line Labor',
+    'Water Line Material',
+    'Water Line Labor',
+    'Plumbing Permit',
+  ]),
+]
+
+export const WATER_HEATER_ITEM_CATEGORIES = [
+  'Install Water Heater',
+  'Tankless Water Heater',
+  'Install Tankless Water Heater',
+] as const
+
+export const ITEM_CATEGORY_OPTIONS = [...new Set([...PREVIEW_ITEM_CATEGORIES, ...WATER_HEATER_ITEM_CATEGORIES])]
+
+export const ITEM_TOOL_CATEGORY_OPTIONS = [
+  'Tank Water Heater',
+  'Tankless Water Heater',
+  'Kitchen Faucet',
+  'Lav Faucet',
+  'Garbage Disposal',
+  'Toilet',
+  'Shower Trim',
+  'Tub Shower Trim',
+  'Pedestal',
+  'Bathtub',
+  'Hose Bibb',
+  'Ice Maker',
+] as const
 
 export function findBaselineByTemplateCode(templateCode: string | null | undefined) {
   return BASELINE_OPTIONS.find((option) => option.templateCode === templateCode) ?? null
