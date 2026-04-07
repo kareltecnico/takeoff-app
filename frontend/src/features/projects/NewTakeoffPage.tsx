@@ -2112,12 +2112,12 @@ export function NewTakeoffPage() {
         <InfoCard subtitle="Step 4 — Verify the takeoff before committing it" title="Preview">
           <div className="grid gap-4 xl:grid-cols-5">
             <div className="rounded-2xl bg-slate-50 px-4 py-4">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Project</p>
-              <p className="mt-1 text-sm font-semibold text-slate-900">{projectName || 'Enter project info'}</p>
+              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Company</p>
+              <p className="mt-1 text-sm font-semibold text-slate-900">{contractorName || 'Not set'}</p>
             </div>
             <div className="rounded-2xl bg-slate-50 px-4 py-4">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Model</p>
-              <p className="mt-1 text-sm font-semibold text-slate-900">{models.join(', ') || 'No models added'}</p>
+              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Project Name</p>
+              <p className="mt-1 text-sm font-semibold text-slate-900">{projectName || 'Enter project info'}</p>
             </div>
             <div className="rounded-2xl bg-slate-50 px-4 py-4">
               <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Structure</p>
@@ -2127,12 +2127,12 @@ export function NewTakeoffPage() {
               ) : null}
             </div>
             <div className="rounded-2xl bg-slate-50 px-4 py-4">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Foreman</p>
-              <p className="mt-1 text-sm font-semibold text-slate-900">{foremanName || 'Not set'}</p>
+              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Models</p>
+              <p className="mt-1 text-sm font-semibold text-slate-900">{models.join(', ') || 'No models added'}</p>
             </div>
             <div className="rounded-2xl bg-slate-50 px-4 py-4">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Company</p>
-              <p className="mt-1 text-sm font-semibold text-slate-900">{contractorName || 'Not set'}</p>
+              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Foreman</p>
+              <p className="mt-1 text-sm font-semibold text-slate-900">{foremanName || 'Not set'}</p>
             </div>
           </div>
 
@@ -2159,111 +2159,112 @@ export function NewTakeoffPage() {
                         </h3>
                         <p className="text-sm text-slate-500">{lines.length} line items</p>
                       </div>
-
-                      {stage === 'ground' ? (
-                        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-                            <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Stories</p>
-                            <p className="mt-2 text-lg font-semibold text-slate-900">{plan.stories}</p>
-                            <p className="mt-1 text-xs text-slate-500">Driver only, not a priced line</p>
-                          </div>
-                          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-                            <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Sewer Service</p>
-                            <p className="mt-2 text-lg font-semibold text-slate-900">
-                              {numberString(toNumber(plan.sewer_distance_lf))} LF
-                            </p>
-                          </div>
-                          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-                            <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Water Service</p>
-                            <p className="mt-2 text-lg font-semibold text-slate-900">
-                              {numberString(toNumber(plan.water_distance_lf))} LF
-                            </p>
-                          </div>
-                          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-                            <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Plumbing Permit</p>
-                            <p className="mt-2 text-lg font-semibold text-slate-900">
-                              {previewStageSummary.ground.permitTotal > 0
-                                ? formatCurrency(previewStageSummary.ground.permitTotal)
-                                : 'Not added'}
-                            </p>
-                          </div>
-                        </div>
-                      ) : null}
-
-                      {stage === 'topout' ? (
-                        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-                            <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Hose Bibbs</p>
-                            <p className="mt-2 text-lg font-semibold text-slate-900">{plan.hose_bibbs}</p>
-                          </div>
-                          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-                            <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Ice Makers</p>
-                            <p className="mt-2 text-lg font-semibold text-slate-900">{plan.ice_makers}</p>
-                          </div>
-                          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 md:col-span-2">
-                            <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Bathtub</p>
-                            <p className="mt-2 text-lg font-semibold text-slate-900">{plan.bathtubs}</p>
-                            <p className="mt-1 text-xs text-slate-500">{bathtubItemSummary ?? 'No bathtub item selected'}</p>
-                          </div>
-                        </div>
-                      ) : null}
-
-                      {stage === 'final' ? (
-                        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 md:col-span-2 xl:col-span-3">
-                            <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Water Heater</p>
-                            <p className="mt-2 text-sm font-semibold leading-6 text-slate-900">{waterHeaterSummary}</p>
-                          </div>
-                          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-                            <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Kitchen Faucet</p>
-                            <p className="mt-2 text-lg font-semibold text-slate-900">{plan.kitchens}</p>
-                          </div>
-                          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-                            <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Lavatory Faucet</p>
-                            <p className="mt-2 text-lg font-semibold text-slate-900">{plan.lav_faucets}</p>
-                          </div>
-                          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-                            <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Toilet</p>
-                            <p className="mt-2 text-lg font-semibold text-slate-900">{plan.toilets}</p>
-                          </div>
-                          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-                            <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Shower Trim</p>
-                            <p className="mt-2 text-lg font-semibold text-slate-900">{plan.showers}</p>
-                          </div>
-                          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-                            <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Tub/Shower Trim</p>
-                            <p className="mt-2 text-lg font-semibold text-slate-900">{plan.bathtubs}</p>
-                          </div>
-                        </div>
-                      ) : null}
-
-                      <div className="mt-4 flex flex-wrap items-center gap-3 text-sm text-slate-500">
-                        {stage === 'ground' && previewStageSummary.ground.extraCount > 0 ? (
-                          <span>+ {previewStageSummary.ground.extraCount} additional line items in details</span>
-                        ) : null}
-                        {stage === 'topout' && previewStageSummary.topout.extraCount > 0 ? (
-                          <span>+ {previewStageSummary.topout.extraCount} additional line items in details</span>
-                        ) : null}
-                        {stage === 'final' && previewStageSummary.final.extraCount > 0 ? (
-                          <span>+ {previewStageSummary.final.extraCount} additional line items in details</span>
-                        ) : null}
-                        {!lines.length ? <span>No priced items in this stage yet.</span> : null}
-                      </div>
                     </div>
 
-                    <div className="flex flex-col items-end gap-3">
-                      <div className="rounded-2xl bg-slate-950 px-5 py-4 text-right text-white">
-                        <p className="text-[11px] uppercase tracking-[0.18em] text-slate-300">Stage Total</p>
-                        <p className="mt-2 text-2xl font-semibold">{formatCurrency(subtotal)}</p>
-                      </div>
-                      <button
-                        className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
-                        onClick={() => togglePreviewStage(stage)}
-                        type="button"
-                      >
-                        {expanded ? 'Hide details' : 'Show details'}
-                      </button>
+                    <div className="min-w-[180px] rounded-2xl bg-slate-950 px-5 py-4 text-right text-white shadow-sm">
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-300">Stage Total</p>
+                      <p className="mt-2 text-2xl font-semibold">{formatCurrency(subtotal)}</p>
                     </div>
+                  </div>
+
+                  {stage === 'ground' ? (
+                    <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Stories</p>
+                        <p className="mt-2 text-lg font-semibold text-slate-900">{plan.stories}</p>
+                        <p className="mt-1 text-xs text-slate-500">Driver only, not a priced line</p>
+                      </div>
+                      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Sewer Service</p>
+                        <p className="mt-2 text-lg font-semibold text-slate-900">
+                          {numberString(toNumber(plan.sewer_distance_lf))} LF
+                        </p>
+                      </div>
+                      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Water Service</p>
+                        <p className="mt-2 text-lg font-semibold text-slate-900">
+                          {numberString(toNumber(plan.water_distance_lf))} LF
+                        </p>
+                      </div>
+                      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Plumbing Permit</p>
+                        <p className="mt-2 text-lg font-semibold text-slate-900">
+                          {previewStageSummary.ground.permitTotal > 0
+                            ? formatCurrency(previewStageSummary.ground.permitTotal)
+                            : 'Not added'}
+                        </p>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {stage === 'topout' ? (
+                    <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Hose Bibbs</p>
+                        <p className="mt-2 text-lg font-semibold text-slate-900">{plan.hose_bibbs}</p>
+                      </div>
+                      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Ice Makers</p>
+                        <p className="mt-2 text-lg font-semibold text-slate-900">{plan.ice_makers}</p>
+                      </div>
+                      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 md:col-span-2">
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Bathtub</p>
+                        <p className="mt-2 text-lg font-semibold text-slate-900">{plan.bathtubs}</p>
+                        <p className="mt-1 text-xs text-slate-500">{bathtubItemSummary ?? 'No bathtub item selected'}</p>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {stage === 'final' ? (
+                    <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 md:col-span-2 xl:col-span-3">
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Water Heater</p>
+                        <p className="mt-2 text-sm font-semibold leading-6 text-slate-900">{waterHeaterSummary}</p>
+                      </div>
+                      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Kitchen Faucet</p>
+                        <p className="mt-2 text-lg font-semibold text-slate-900">{plan.kitchens}</p>
+                      </div>
+                      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Lavatory Faucet</p>
+                        <p className="mt-2 text-lg font-semibold text-slate-900">{plan.lav_faucets}</p>
+                      </div>
+                      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Toilet</p>
+                        <p className="mt-2 text-lg font-semibold text-slate-900">{plan.toilets}</p>
+                      </div>
+                      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Shower Trim</p>
+                        <p className="mt-2 text-lg font-semibold text-slate-900">{plan.showers}</p>
+                      </div>
+                      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Tub/Shower Trim</p>
+                        <p className="mt-2 text-lg font-semibold text-slate-900">{plan.bathtubs}</p>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4">
+                    <div className="flex flex-wrap items-center gap-3 text-sm text-slate-500">
+                      {stage === 'ground' && previewStageSummary.ground.extraCount > 0 ? (
+                        <span>+ {previewStageSummary.ground.extraCount} additional line items in details</span>
+                      ) : null}
+                      {stage === 'topout' && previewStageSummary.topout.extraCount > 0 ? (
+                        <span>+ {previewStageSummary.topout.extraCount} additional line items in details</span>
+                      ) : null}
+                      {stage === 'final' && previewStageSummary.final.extraCount > 0 ? (
+                        <span>+ {previewStageSummary.final.extraCount} additional line items in details</span>
+                      ) : null}
+                      {!lines.length ? <span>No priced items in this stage yet.</span> : null}
+                    </div>
+
+                    <button
+                      className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
+                      onClick={() => togglePreviewStage(stage)}
+                      type="button"
+                    >
+                      {expanded ? 'Hide details' : 'Show details'}
+                    </button>
                   </div>
 
                   {expanded ? (
@@ -2319,18 +2320,31 @@ export function NewTakeoffPage() {
             })}
           </div>
 
-          <div className="mt-6 grid gap-4 lg:grid-cols-3">
-            <div className="rounded-2xl bg-slate-950 px-5 py-5 text-white">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-300">Overall Total</p>
-              <p className="mt-2 text-2xl font-semibold">{formatCurrency(previewTotal)}</p>
+          <div className="mt-6 rounded-3xl border border-slate-200 bg-white p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Preview Totals</p>
+                <p className="mt-1 text-sm text-slate-500">Final operational summary for the current takeoff preview.</p>
+              </div>
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-white px-5 py-5 text-sm text-slate-600">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Water Points</p>
-              <p className="mt-2 text-xl font-semibold text-slate-900">{numberString(effectiveWaterPoints)}</p>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-white px-5 py-5 text-sm text-slate-600">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Generated Lines</p>
-              <p className="mt-2 text-xl font-semibold text-slate-900">{autoGeneratedLines.length}</p>
+
+            <div className="mt-4 grid gap-3 lg:grid-cols-4">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-5">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Total Ground</p>
+                <p className="mt-2 text-xl font-semibold text-slate-900">{formatCurrency(stageSubtotals.ground)}</p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-5">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Total TopOut</p>
+                <p className="mt-2 text-xl font-semibold text-slate-900">{formatCurrency(stageSubtotals.topout)}</p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-5">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Total Final</p>
+                <p className="mt-2 text-xl font-semibold text-slate-900">{formatCurrency(stageSubtotals.final)}</p>
+              </div>
+              <div className="rounded-2xl bg-slate-950 px-5 py-5 text-white">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-300">Grand Total</p>
+                <p className="mt-2 text-2xl font-semibold">{formatCurrency(previewTotal)}</p>
+              </div>
             </div>
           </div>
 
