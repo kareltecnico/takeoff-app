@@ -1,13 +1,17 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { InfoCard } from '../../components/ui/InfoCard'
 import { formatDateTime } from '../../lib/format'
 import { useSession } from '../auth/useSession'
-import { useProjects } from './api'
+import { useProjects, useUpdateProjectArchive } from './api'
 
 export function ProjectsPage() {
   const session = useSession()
-  const projects = useProjects()
+  const [archiveView, setArchiveView] = useState<'active' | 'archived'>('active')
+  const projects = useProjects(archiveView)
+  const updateProjectArchive = useUpdateProjectArchive()
+  const isEditor = session.data?.role === 'editor'
 
   return (
     <div className="space-y-6">
@@ -26,7 +30,32 @@ export function ProjectsPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {session.data?.role === 'editor' ? (
+          <div className="flex rounded-full border border-slate-300 bg-white p-1 shadow-sm">
+            <button
+              className={`rounded-full px-4 py-2 text-sm font-medium transition ${
+                archiveView === 'active'
+                  ? 'bg-slate-950 text-white'
+                  : 'text-slate-600 hover:bg-slate-50'
+              }`}
+              onClick={() => setArchiveView('active')}
+              type="button"
+            >
+              Active
+            </button>
+            <button
+              className={`rounded-full px-4 py-2 text-sm font-medium transition ${
+                archiveView === 'archived'
+                  ? 'bg-slate-950 text-white'
+                  : 'text-slate-600 hover:bg-slate-50'
+              }`}
+              onClick={() => setArchiveView('archived')}
+              type="button"
+            >
+              Archived
+            </button>
+          </div>
+
+          {isEditor ? (
             <Link
               className="rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
               to="/projects/new-takeoff"
@@ -56,9 +85,18 @@ export function ProjectsPage() {
       ) : null}
 
       {projects.data?.length === 0 ? (
-        <InfoCard subtitle="No projects are available yet." title="No projects found">
+        <InfoCard
+          subtitle={
+            archiveView === 'archived'
+              ? 'No archived projects are available.'
+              : 'No active projects are available yet.'
+          }
+          title="No projects found"
+        >
           <p className="text-sm text-slate-500">
-            Once projects and current takeoffs exist, they will appear here.
+            {archiveView === 'archived'
+              ? 'Archived projects will appear here when explicitly requested.'
+              : 'Once projects and current takeoffs exist, they will appear here.'}
           </p>
         </InfoCard>
       ) : null}
@@ -71,19 +109,43 @@ export function ProjectsPage() {
             title={`${project.project_code} — ${project.project_name}`}
           >
             <div className="mb-4 flex items-center justify-between">
-              <span
-                className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${
-                  project.status === 'open'
-                    ? 'bg-emerald-50 text-emerald-700'
-                    : 'bg-slate-100 text-slate-600'
-                }`}
-              >
-                {project.status}
-              </span>
-              <span className="text-xs uppercase tracking-[0.18em] text-slate-400">
-                {project.current_takeoffs.length} current takeoff
-                {project.current_takeoffs.length === 1 ? '' : 's'}
-              </span>
+              <div className="flex items-center gap-2">
+                <span
+                  className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${
+                    project.status === 'open'
+                      ? 'bg-emerald-50 text-emerald-700'
+                      : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  {project.status}
+                </span>
+                {project.is_archived ? (
+                  <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">
+                    archived
+                  </span>
+                ) : null}
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-xs uppercase tracking-[0.18em] text-slate-400">
+                  {project.current_takeoffs.length} current takeoff
+                  {project.current_takeoffs.length === 1 ? '' : 's'}
+                </span>
+                {isEditor ? (
+                  <button
+                    className="rounded-full border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={updateProjectArchive.isPending}
+                    onClick={() =>
+                      updateProjectArchive.mutate({
+                        projectCode: project.project_code,
+                        isArchived: !project.is_archived,
+                      })
+                    }
+                    type="button"
+                  >
+                    {project.is_archived ? 'Unarchive' : 'Archive'}
+                  </button>
+                ) : null}
+              </div>
             </div>
 
             {project.current_takeoffs.length === 0 ? (

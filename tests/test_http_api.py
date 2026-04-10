@@ -207,6 +207,7 @@ def test_generate_projects_list_and_current_takeoff_read_flow(tmp_path: Path) ->
         json={
             "project_code": "PROJ-001",
             "template_code": "TH_STANDARD",
+            "model_display": "1331",
             "tax_rate_override": None,
             "plan": {
                 "stories": 1,
@@ -269,6 +270,9 @@ def test_generate_projects_list_and_current_takeoff_read_flow(tmp_path: Path) ->
 
     current = client.get(f"/api/v1/takeoffs/{takeoff_id}")
     assert current.status_code == 200
+    assert current.json()["takeoff"]["template_code"] == "TH_STANDARD"
+    assert current.json()["takeoff"]["model_display"] == "1331"
+    assert current.json()["takeoff"]["stage_totals"]["ground"]["subtotal"]
     assert current.json()["takeoff"]["summary"]["stage_counts"] == {
         "ground": 1,
         "topout": 0,
@@ -279,6 +283,81 @@ def test_generate_projects_list_and_current_takeoff_read_flow(tmp_path: Path) ->
     assert lines.status_code == 200
     assert len(lines.json()["items"]) == 1
     assert lines.json()["items"][0]["line_id"]
+    assert lines.json()["items"][0]["unit_price"]
+    assert lines.json()["items"][0]["line_total"]
+
+
+def test_project_archive_flow_hides_from_default_list_and_preserves_takeoff_access(tmp_path: Path) -> None:
+    client = _build_client(tmp_path)
+    _login(client, "editor")
+
+    generate = client.post(
+        "/api/v1/takeoffs/generate-from-plan",
+        json={
+            "project_code": "PROJ-001",
+            "template_code": "TH_STANDARD",
+            "model_display": "1331",
+            "tax_rate_override": None,
+            "plan": {
+                "stories": 1,
+                "kitchens": 1,
+                "garbage_disposals": 0,
+                "laundry_rooms": 0,
+                "lav_faucets": 0,
+                "toilets": 0,
+                "showers": 0,
+                "bathtubs": 0,
+                "half_baths": 0,
+                "double_bowl_vanities": 0,
+                "hose_bibbs": 0,
+                "ice_makers": 0,
+                "water_heater_tank_qty": 0,
+                "water_heater_tankless_qty": 0,
+                "sewer_distance_lf": "10",
+                "water_distance_lf": "0"
+            }
+        },
+    )
+    takeoff_id = generate.json()["takeoff"]["takeoff_id"]
+
+    archive = client.patch("/api/v1/projects/PROJ-001", json={"is_archived": True})
+    assert archive.status_code == 200
+    assert archive.json()["project"]["is_archived"] is True
+
+    active_list = client.get("/api/v1/projects")
+    assert active_list.status_code == 200
+    assert active_list.json()["items"] == []
+
+    archived_list = client.get("/api/v1/projects", params={"archive": "archived"})
+    assert archived_list.status_code == 200
+    assert len(archived_list.json()["items"]) == 1
+    assert archived_list.json()["items"][0]["project_code"] == "PROJ-001"
+    assert archived_list.json()["items"][0]["is_archived"] is True
+
+    all_list = client.get("/api/v1/projects", params={"archive": "all"})
+    assert all_list.status_code == 200
+    assert len(all_list.json()["items"]) == 1
+
+    current = client.get(f"/api/v1/takeoffs/{takeoff_id}")
+    assert current.status_code == 200
+    assert current.json()["takeoff"]["project"]["project_name"] == "Project One"
+
+    unarchive = client.patch("/api/v1/projects/PROJ-001", json={"is_archived": False})
+    assert unarchive.status_code == 200
+    assert unarchive.json()["project"]["is_archived"] is False
+
+    restored = client.get("/api/v1/projects")
+    assert restored.status_code == 200
+    assert len(restored.json()["items"]) == 1
+
+
+def test_viewer_cannot_archive_project(tmp_path: Path) -> None:
+    client = _build_client(tmp_path)
+    _login(client, "viewer")
+
+    archive = client.patch("/api/v1/projects/PROJ-001", json={"is_archived": True})
+    assert archive.status_code == 403
+    assert archive.json()["error"]["code"] == "forbidden"
 
 
 def test_line_patch_requires_payload_and_supports_line_id_updates(tmp_path: Path) -> None:
@@ -324,6 +403,8 @@ def test_line_patch_requires_payload_and_supports_line_id_updates(tmp_path: Path
     )
     assert patch.status_code == 200
     assert patch.json()["line"]["qty"] == "12.0"
+    assert patch.json()["line"]["unit_price"]
+    assert patch.json()["line"]["line_total"]
 
 
 def test_viewer_cannot_mutate_lines(tmp_path: Path) -> None:

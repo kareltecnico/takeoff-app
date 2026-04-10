@@ -59,14 +59,15 @@ class SqliteTakeoffRepository:
             self.conn.execute(
                 """
                 INSERT INTO takeoffs (
-                    takeoff_id, project_code, template_code, tax_rate, valve_discount, is_locked, updated_at
+                    takeoff_id, project_code, template_code, model_display, tax_rate, valve_discount, is_locked, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+                VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
                 """,
                 (
                     takeoff.takeoff_id,
                     takeoff.project_code,
                     takeoff.template_code,
+                    takeoff.model_display,
                     str(takeoff.tax_rate),
                     str(takeoff.valve_discount),
                     1 if takeoff.is_locked else 0,
@@ -80,7 +81,7 @@ class SqliteTakeoffRepository:
     def get(self, takeoff_id: str) -> TakeoffRecord:
         row = self.conn.execute(
             """
-            SELECT takeoff_id, project_code, template_code, tax_rate, valve_discount, is_locked, created_at
+            SELECT takeoff_id, project_code, template_code, model_display, tax_rate, valve_discount, is_locked, created_at
             FROM takeoffs
             WHERE takeoff_id = ?
             """,
@@ -95,6 +96,7 @@ class SqliteTakeoffRepository:
             project_code=str(row["project_code"]),
             template_code=str(row["template_code"]),
             tax_rate=Decimal(str(row["tax_rate"])),
+            model_display=str(row["model_display"]) if row["model_display"] is not None else None,
             valve_discount=Decimal(str(row["valve_discount"])),
             is_locked=bool(int(row["is_locked"])),
             created_at=str(row["created_at"]),
@@ -103,7 +105,7 @@ class SqliteTakeoffRepository:
     def find_by_project_template(self, *, project_code: str, template_code: str) -> TakeoffRecord | None:
         row = self.conn.execute(
             """
-            SELECT takeoff_id, project_code, template_code, tax_rate, valve_discount, is_locked, created_at
+            SELECT takeoff_id, project_code, template_code, model_display, tax_rate, valve_discount, is_locked, created_at
             FROM takeoffs
             WHERE project_code = ? AND template_code = ?
             """,
@@ -118,6 +120,7 @@ class SqliteTakeoffRepository:
             project_code=str(row["project_code"]),
             template_code=str(row["template_code"]),
             tax_rate=Decimal(str(row["tax_rate"])),
+            model_display=str(row["model_display"]) if row["model_display"] is not None else None,
             valve_discount=Decimal(str(row["valve_discount"])),
             is_locked=bool(int(row["is_locked"])),
             created_at=str(row["created_at"]),
@@ -126,7 +129,7 @@ class SqliteTakeoffRepository:
     def list_for_project(self, project_code: str) -> tuple[TakeoffRecord, ...]:
         rows = self.conn.execute(
             """
-            SELECT takeoff_id, project_code, template_code, tax_rate, valve_discount, is_locked, created_at
+            SELECT takeoff_id, project_code, template_code, model_display, tax_rate, valve_discount, is_locked, created_at
             FROM takeoffs
             WHERE project_code = ?
             ORDER BY created_at DESC
@@ -142,6 +145,7 @@ class SqliteTakeoffRepository:
                     project_code=str(r["project_code"]),
                     template_code=str(r["template_code"]),
                     tax_rate=Decimal(str(r["tax_rate"])),
+                    model_display=str(r["model_display"]) if r["model_display"] is not None else None,
                     valve_discount=Decimal(str(r["valve_discount"])),
                     is_locked=bool(int(r["is_locked"])),
                     created_at=str(r["created_at"]),

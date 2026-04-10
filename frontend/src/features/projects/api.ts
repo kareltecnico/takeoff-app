@@ -9,6 +9,7 @@ export type ProjectRow = {
   contractor_name: string | null
   foreman_name: string | null
   status: 'open' | 'closed'
+  is_archived: boolean
   current_takeoffs: Array<{
     takeoff_id: string
     template_code: string
@@ -23,12 +24,42 @@ export type ProjectRow = {
   }>
 }
 
-export function useProjects() {
+export function useProjects(archiveFilter: 'active' | 'archived' | 'all' = 'active') {
   return useQuery({
-    queryKey: ['projects'],
+    queryKey: ['projects', archiveFilter],
     queryFn: async () => {
-      const response = await apiRequest<{ items: ProjectRow[] }>('/api/v1/projects')
+      const response = await apiRequest<{ items: ProjectRow[] }>(`/api/v1/projects?archive=${archiveFilter}`)
       return response.items
+    },
+  })
+}
+
+export function useUpdateProjectArchive() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({
+      projectCode,
+      isArchived,
+    }: {
+      projectCode: string
+      isArchived: boolean
+    }) =>
+      apiRequest<{
+        project: {
+          project_code: string
+          project_name: string
+          contractor_name: string | null
+          foreman_name: string | null
+          status: 'open' | 'closed'
+          is_archived: boolean
+        }
+      }>(`/api/v1/projects/${projectCode}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ is_archived: isArchived }),
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['projects'] })
     },
   })
 }
@@ -52,6 +83,7 @@ export function useCreateProject() {
           contractor_name: string | null
           foreman_name: string | null
           status: 'open' | 'closed'
+          is_archived: boolean
         }
       }>('/api/v1/projects', {
         method: 'POST',
@@ -66,6 +98,7 @@ export function useCreateProject() {
 type GenerateTakeoffPayload = {
   project_code: string
   template_code: string
+  model_display?: string
   tax_rate_override: null
   plan: {
     stories: number
@@ -95,6 +128,7 @@ export function useGenerateTakeoff() {
       apiRequest<{
         takeoff: {
           takeoff_id: string
+          model_display: string | null
         }
       }>('/api/v1/takeoffs/generate-from-plan', {
         method: 'POST',

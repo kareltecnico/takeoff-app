@@ -35,6 +35,7 @@ from app.http.schemas import (
     ExportRequest,
     GenerateTakeoffRequest,
     LoginRequest,
+    ProjectArchiveRequest,
     ProjectCreateRequest,
     UpdateLineRequest,
 )
@@ -44,6 +45,7 @@ from app.application.render_takeoff_from_snapshot import (
     RenderTakeoffFromVersion,
 )
 from app.config import AppConfig
+from app.domain.money import calc_line_totals
 
 
 def _money(value: Decimal) -> str:
@@ -71,6 +73,12 @@ def _totals_payload(grand_totals: GrandTotals) -> dict[str, str]:
 
 
 def _line_to_payload(line: Any) -> dict[str, Any]:
+    line_totals = calc_line_totals(
+        price=line.unit_price_snapshot,
+        qty=line.qty,
+        factor=line.factor,
+        taxable=line.taxable_snapshot,
+    )
     return {
         "line_id": getattr(line, "line_id", None),
         "mapping_id": getattr(line, "mapping_id", None),
@@ -79,6 +87,8 @@ def _line_to_payload(line: Any) -> dict[str, Any]:
         "qty": _decimal_str(line.qty),
         "stage": (line.stage.value if isinstance(line.stage, Stage) else str(line.stage or "final")),
         "factor": _decimal_str(line.factor),
+        "unit_price": _money(line.unit_price_snapshot),
+        "line_total": _money(line_totals.subtotal),
         "sort_order": int(line.sort_order),
     }
 
@@ -241,10 +251,21 @@ def create_app(*, db_path: Path, session_secret: str = "dev-session-secret") -> 
     def list_projects(
         q: str | None = None,
         status_filter: str | None = Query(default=None, alias="status"),
+        archive_filter: str = Query(default="active", alias="archive"),
         _: User = Depends(get_current_user),
         ctx: RequestContext = Depends(get_context),
     ) -> dict[str, Any]:
-        projects = Projects(repo=ctx.projects).list(include_inactive=True)
+        if archive_filter not in {"active", "archived", "all"}:
+            raise_api_error(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                code="validation_error",
+                message=f"Invalid archive filter: {archive_filter}",
+            )
+
+        projects = Projects(repo=ctx.projects).list_with_archive_state(
+            include_inactive=True,
+            archive_state=archive_filter,
+        )
         inspect_takeoff = InspectTakeoff(takeoff_repo=ctx.takeoffs, takeoff_line_repo=ctx.takeoff_lines)
 
         items: list[dict[str, Any]] = []
@@ -281,6 +302,7 @@ def create_app(*, db_path: Path, session_secret: str = "dev-session-secret") -> 
                     "contractor_name": project.contractor,
                     "foreman_name": project.foreman,
                     "status": project_status,
+                    "is_archived": project.is_archived,
                     "current_takeoffs": current_takeoffs,
                 }
             )
@@ -318,6 +340,7 @@ def create_app(*, db_path: Path, session_secret: str = "dev-session-secret") -> 
                 "contractor_name": project.contractor,
                 "foreman_name": project.foreman,
                 "status": _project_status(project.is_active),
+                "is_archived": project.is_archived,
             }
         }
 
@@ -335,6 +358,27 @@ def create_app(*, db_path: Path, session_secret: str = "dev-session-secret") -> 
                 "contractor_name": project.contractor,
                 "foreman_name": project.foreman,
                 "status": _project_status(project.is_active),
+                "is_archived": project.is_archived,
+            }
+        }
+
+    @app.patch("/api/v1/projects/{project_code}")
+    def update_project_archive_state(
+        project_code: str,
+        payload: ProjectArchiveRequest,
+        _: User = Depends(require_editor),
+        ctx: RequestContext = Depends(get_context),
+    ) -> dict[str, Any]:
+        Projects(repo=ctx.projects).set_archived(code=project_code, is_archived=payload.is_archived)
+        project = ctx.projects.get(project_code)
+        return {
+            "project": {
+                "project_code": project.code,
+                "project_name": project.name,
+                "contractor_name": project.contractor,
+                "foreman_name": project.foreman,
+                "status": _project_status(project.is_active),
+                "is_archived": project.is_archived,
             }
         }
 
@@ -408,6 +452,7 @@ def create_app(*, db_path: Path, session_secret: str = "dev-session-secret") -> 
         )(
             project_code=payload.project_code,
             template_code=payload.template_code,
+            model_display=payload.model_display,
             plan=PlanReadingInput(**payload.plan.model_dump()),
             tax_rate_override=payload.tax_rate_override,
         )
@@ -418,6 +463,7 @@ def create_app(*, db_path: Path, session_secret: str = "dev-session-secret") -> 
                 "takeoff_id": takeoff.takeoff_id,
                 "project_code": takeoff.project_code,
                 "template_code": takeoff.template_code,
+                "model_display": takeoff.model_display,
                 "is_locked": takeoff.is_locked,
                 "created_at": created_at,
                 "updated_at": updated_at,
@@ -439,6 +485,8 @@ def create_app(*, db_path: Path, session_secret: str = "dev-session-secret") -> 
         return {
             "takeoff": {
                 "takeoff_id": inspection.takeoff_id,
+                "template_code": inspection.template_code,
+                "model_display": ctx.takeoffs.get(takeoff_id).model_display,
                 "project": {
                     "project_code": project.code,
                     "project_name": project.name,
@@ -451,6 +499,14 @@ def create_app(*, db_path: Path, session_secret: str = "dev-session-secret") -> 
                 "created_at": created_at,
                 "updated_at": updated_at,
                 "totals": _totals_payload(inspection.grand_totals),
+                "stage_totals": {
+                    stage: {
+                        "subtotal": _money(totals.subtotal),
+                        "tax": _money(totals.tax),
+                        "total": _money(totals.total),
+                    }
+                    for stage, totals in inspection.stage_totals.items()
+                },
                 "summary": {
                     "line_count": inspection.line_count,
                     "stage_counts": {

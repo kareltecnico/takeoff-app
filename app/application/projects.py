@@ -44,6 +44,14 @@ class Projects:
     def list(self, *, include_inactive: bool = False) -> tuple[Project, ...]:
         return self.repo.list(include_inactive=include_inactive)
 
+    def list_with_archive_state(
+        self,
+        *,
+        include_inactive: bool = False,
+        archive_state: str = "active",
+    ) -> tuple[Project, ...]:
+        return self.repo.list(include_inactive=include_inactive, archive_state=archive_state)
+
     def update(
         self,
         *,
@@ -66,8 +74,13 @@ class Projects:
                 contractor=current.contractor if contractor is None else contractor.strip(),
                 foreman=current.foreman if foreman is None else foreman.strip(),
                 is_active=current.is_active if is_active is None else is_active,
+                is_archived=current.is_archived,
+                valve_discount=current.valve_discount,
             )
         )
+
+    def set_archived(self, *, code: str, is_archived: bool) -> None:
+        self.repo.set_archived(code, is_archived=is_archived)
 
     def delete(self, *, code: str) -> None:
         self.repo.delete(code)

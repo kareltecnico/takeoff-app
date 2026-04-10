@@ -4,6 +4,8 @@ import { apiRequest } from '../../lib/api'
 
 export type TakeoffDetail = {
   takeoff_id: string
+  template_code: string
+  model_display: string | null
   project: {
     project_code: string
     project_name: string
@@ -19,6 +21,23 @@ export type TakeoffDetail = {
     subtotal: string
     tax: string
     total: string
+  }
+  stage_totals: {
+    ground: {
+      subtotal: string
+      tax: string
+      total: string
+    }
+    topout: {
+      subtotal: string
+      tax: string
+      total: string
+    }
+    final: {
+      subtotal: string
+      tax: string
+      total: string
+    }
   }
   summary: {
     line_count: number
@@ -38,6 +57,8 @@ export type TakeoffLine = {
   qty: string
   stage: 'ground' | 'topout' | 'final'
   factor: string
+  unit_price: string
+  line_total: string
   sort_order: number
 }
 

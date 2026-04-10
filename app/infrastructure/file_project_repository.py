@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 
 from app.application.errors import InvalidInputError
@@ -36,6 +37,8 @@ def _project_to_dict(p: Project) -> dict[str, object]:
         "contractor": p.contractor,
         "foreman": p.foreman,
         "is_active": p.is_active,
+        "is_archived": p.is_archived,
+        "valve_discount": str(p.valve_discount),
     }
 
 
@@ -46,6 +49,8 @@ def _project_from_dict(d: dict[str, object]) -> Project:
         contractor=_as_opt_str(d.get("contractor"), field="contractor"),
         foreman=_as_opt_str(d.get("foreman"), field="foreman"),
         is_active=_as_bool(d.get("is_active", True), field="is_active"),
+        is_archived=_as_bool(d.get("is_archived", False), field="is_archived"),
+        valve_discount=Decimal(str(d.get("valve_discount", "0.00"))),
     )
 
 
@@ -97,13 +102,51 @@ class FileProjectRepository(ProjectRepository):
         except KeyError as e:
             raise InvalidInputError(f"Project not found: {code}") from e
 
-    def list(self, *, include_inactive: bool = False) -> tuple[Project, ...]:
+    def list(self, *, include_inactive: bool = False, archive_state: str = "active") -> tuple[Project, ...]:
         projects = self._read_all()
         vals = list(projects.values())
         if not include_inactive:
             vals = [p for p in vals if p.is_active]
+        if archive_state == "active":
+            vals = [p for p in vals if not p.is_archived]
+        elif archive_state == "archived":
+            vals = [p for p in vals if p.is_archived]
+        elif archive_state != "all":
+            raise InvalidInputError(f"Invalid archive_state: {archive_state}")
         vals.sort(key=lambda p: p.code)
         return tuple(vals)
+
+    def set_valve_discount(self, code: str, *, valve_discount: Decimal) -> None:
+        projects = self._read_all()
+        if code not in projects:
+            raise InvalidInputError(f"Project not found: {code}")
+        current = projects[code]
+        projects[code] = Project(
+            code=current.code,
+            name=current.name,
+            contractor=current.contractor,
+            foreman=current.foreman,
+            is_active=current.is_active,
+            is_archived=current.is_archived,
+            valve_discount=valve_discount,
+        )
+        self._write_all(projects)
+
+    def set_archived(self, code: str, *, is_archived: bool) -> None:
+        projects = self._read_all()
+        if code not in projects:
+            raise InvalidInputError(f"Project not found: {code}")
+        current = projects[code]
+        projects[code] = Project(
+            code=current.code,
+            name=current.name,
+            contractor=current.contractor,
+            foreman=current.foreman,
+            is_active=current.is_active,
+            is_archived=is_archived,
+            valve_discount=current.valve_discount,
+        )
+        self._write_all(projects)
 
     def delete(self, code: str) -> None:
         projects = self._read_all()

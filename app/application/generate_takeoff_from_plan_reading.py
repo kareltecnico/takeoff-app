@@ -46,6 +46,7 @@ class GenerateTakeoffFromPlanReading:
         *,
         project_code: str,
         template_code: str,
+        model_display: str | None = None,
         plan: PlanReadingInput,
         tax_rate_override: Decimal | None = None,
     ) -> str:
@@ -96,6 +97,7 @@ class GenerateTakeoffFromPlanReading:
             project_code=project_code,
             template_code=template_code,
             tax_rate=tax_rate,
+            model_display=model_display.strip() if model_display is not None and model_display.strip() else None,
             valve_discount=project.valve_discount,
             created_at="",
         )

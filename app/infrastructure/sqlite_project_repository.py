@@ -41,15 +41,17 @@ class SqliteProjectRepository(ProjectRepository):
                 contractor_name,
                 foreman,
                 valve_discount,
+                is_archived,
                 is_active,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+            VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
             ON CONFLICT(project_code) DO UPDATE SET
                 project_name=excluded.project_name,
                 contractor_name=excluded.contractor_name,
                 foreman=excluded.foreman,
                 valve_discount=excluded.valve_discount,
+                is_archived=excluded.is_archived,
                 is_active=excluded.is_active,
                 updated_at=datetime('now')
             """,
@@ -59,6 +61,7 @@ class SqliteProjectRepository(ProjectRepository):
                 project.contractor,
                 project.foreman,
                 str(project.valve_discount),
+                _b(project.is_archived),
                 _b(project.is_active),
             ),
         )
@@ -68,7 +71,7 @@ class SqliteProjectRepository(ProjectRepository):
         
         row = self.conn.execute(
             """
-            SELECT project_code, project_name, contractor_name, foreman, is_active, valve_discount
+            SELECT project_code, project_name, contractor_name, foreman, is_active, is_archived, valve_discount
             FROM projects
             WHERE project_code = ?
             """,
@@ -84,28 +87,34 @@ class SqliteProjectRepository(ProjectRepository):
             contractor=row["contractor_name"],
             foreman=row["foreman"],
             is_active=_bool(row["is_active"]),
+            is_archived=_bool(row["is_archived"]),
             valve_discount=Decimal(str(row["valve_discount"])),
         )
 
-    def list(self, *, include_inactive: bool = False) -> tuple[Project, ...]:
-        
-        if include_inactive:
-            rows = self.conn.execute(
-                """
-                SELECT project_code, project_name, contractor_name, foreman, is_active, valve_discount
-                FROM projects
-                ORDER BY project_code
-                """
-            ).fetchall()
-        else:
-            rows = self.conn.execute(
-                """
-                SELECT project_code, project_name, contractor_name, foreman, is_active, valve_discount
-                FROM projects
-                WHERE is_active = 1
-                ORDER BY project_code
-                """
-            ).fetchall()
+    def list(self, *, include_inactive: bool = False, archive_state: str = "active") -> tuple[Project, ...]:
+        conditions: list[str] = []
+        params: list[object] = []
+
+        if not include_inactive:
+            conditions.append("is_active = 1")
+
+        if archive_state == "active":
+            conditions.append("is_archived = 0")
+        elif archive_state == "archived":
+            conditions.append("is_archived = 1")
+        elif archive_state != "all":
+            raise InvalidInputError(f"Invalid archive_state: {archive_state}")
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        rows = self.conn.execute(
+            f"""
+            SELECT project_code, project_name, contractor_name, foreman, is_active, is_archived, valve_discount
+            FROM projects
+            {where_clause}
+            ORDER BY project_code
+            """,
+            params,
+        ).fetchall()
 
         out: list[Project] = []
         for row in rows:
@@ -116,6 +125,7 @@ class SqliteProjectRepository(ProjectRepository):
                     contractor=row["contractor_name"],
                     foreman=row["foreman"],
                     is_active=_bool(row["is_active"]),
+                    is_archived=_bool(row["is_archived"]),
                     valve_discount=Decimal(str(row["valve_discount"])),
                 )
             )
@@ -135,6 +145,22 @@ class SqliteProjectRepository(ProjectRepository):
             WHERE project_code = ?
             """,
             (str(valve_discount), code),
+        )
+        self.conn.commit()
+
+    def set_archived(self, code: str, *, is_archived: bool) -> None:
+        if not str(code).strip():
+            raise InvalidInputError("Project code cannot be empty")
+
+        _ = self.get(code=code)
+
+        self.conn.execute(
+            """
+            UPDATE projects
+            SET is_archived = ?, updated_at = datetime('now')
+            WHERE project_code = ?
+            """,
+            (_b(is_archived), code),
         )
         self.conn.commit()
 

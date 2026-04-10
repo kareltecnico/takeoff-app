@@ -17,6 +17,10 @@ class ProjectCreateRequest(BaseModel):
     foreman_name: str | None = None
 
 
+class ProjectArchiveRequest(BaseModel):
+    is_archived: bool
+
+
 class PlanInputPayload(BaseModel):
     stories: int = Field(ge=0)
     kitchens: int = Field(ge=0)
@@ -39,6 +43,7 @@ class PlanInputPayload(BaseModel):
 class GenerateTakeoffRequest(BaseModel):
     project_code: str
     template_code: str
+    model_display: str | None = None
     tax_rate_override: Decimal | None = None
     plan: PlanInputPayload
 

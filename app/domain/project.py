@@ -11,4 +11,5 @@ class Project:
     contractor: str | None
     foreman: str | None
     is_active: bool = True
+    is_archived: bool = False
     valve_discount: Decimal = Decimal("0.00")

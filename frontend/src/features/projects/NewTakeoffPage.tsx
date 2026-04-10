@@ -222,6 +222,18 @@ function parseModelEntries(input: string) {
     .filter(Boolean)
 }
 
+function buildModelDisplay(models: string[]) {
+  if (models.length === 0) {
+    return ''
+  }
+
+  if (models.length === 1) {
+    return models[0]
+  }
+
+  return models.join('-')
+}
+
 function itemDisplayLabel(item: Pick<CatalogItem, 'description' | 'details'>) {
   return item.details && item.details !== '0' ? `${item.description} — ${item.details}` : item.description
 }
@@ -1080,6 +1092,7 @@ export function NewTakeoffPage() {
       await generateTakeoff.mutateAsync({
         project_code: created.project.project_code,
         template_code: effectiveBaseline.templateCode,
+        model_display: buildModelDisplay(models),
         tax_rate_override: null,
         plan: {
           stories: Number(plan.stories),

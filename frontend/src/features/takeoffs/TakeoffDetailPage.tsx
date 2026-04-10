@@ -4,6 +4,8 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { InfoCard } from '../../components/ui/InfoCard'
 import { ApiError } from '../../lib/api'
 import { formatDateTime } from '../../lib/format'
+import { findBaselineByTemplateCode } from '../projects/createTakeoffConfig'
+import { useOfficialTemplates } from '../templates/api'
 import { useSession } from '../auth/useSession'
 import {
   useCreateRevision,
@@ -84,10 +86,48 @@ function humanizeRevisionError(error: unknown): string {
   return 'Unexpected API error.'
 }
 
+function formatCurrency(value: string | number) {
+  const amount = typeof value === 'number' ? value : Number(value)
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+  }).format(Number.isFinite(amount) ? amount : 0)
+}
+
+function formatQuantity(value: string) {
+  const amount = Number(value)
+  if (!Number.isFinite(amount)) {
+    return value
+  }
+  return Number.isInteger(amount) ? String(amount) : String(amount)
+}
+
+function normalizeOperatorModelLabel(value: string | null | undefined) {
+  if (!value) {
+    return null
+  }
+
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return null
+  }
+
+  const withoutVillaPrefix = trimmed.replace(/^Villa\s+/i, '')
+  const normalizedGroup = withoutVillaPrefix.replace(/\s*\/\s*/g, '-').replace(/\s+/g, '')
+  const genericLabels = new Set(['standard', 'generic', 'default', 'thstandard', 'sfgeneric', 'thdefault'])
+
+  if (genericLabels.has(normalizedGroup.toLowerCase())) {
+    return null
+  }
+
+  return normalizedGroup
+}
+
 export function TakeoffDetailPage() {
   const { takeoffId = '' } = useParams()
   const navigate = useNavigate()
   const session = useSession()
+  const templates = useOfficialTemplates()
   const detail = useTakeoffDetail(takeoffId)
   const lines = useTakeoffLines(takeoffId)
   const updateLine = useUpdateTakeoffLine()
@@ -115,6 +155,23 @@ export function TakeoffDetailPage() {
         ),
     }))
   }, [lines.data])
+
+  const baselineInfo = useMemo(
+    () => findBaselineByTemplateCode(detail.data?.template_code),
+    [detail.data?.template_code],
+  )
+  const templateName = useMemo(
+    () =>
+      (templates.data ?? []).find((template) => template.template_code === detail.data?.template_code)?.template_name ??
+      null,
+    [detail.data?.template_code, templates.data],
+  )
+  const modelLabel =
+    normalizeOperatorModelLabel(detail.data?.model_display) ??
+    normalizeOperatorModelLabel(templateName) ??
+    normalizeOperatorModelLabel(baselineInfo?.label) ??
+    'Not available'
+  const structureLabel = baselineInfo?.structureType ?? 'Unknown'
 
   function openEditModal(line: TakeoffLine) {
     setMutationError(null)
@@ -189,8 +246,9 @@ export function TakeoffDetailPage() {
             Current Takeoff
           </p>
           <h2 className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">
-            {detail.data?.project.project_code ?? 'Takeoff detail'}
+            {detail.data?.project.project_name ?? 'Takeoff detail'}
           </h2>
+          <p className="mt-2 text-base font-medium text-slate-700">{modelLabel}</p>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
             Review stage-grouped lines, confirm financial totals, and apply controlled CURRENT
             line adjustments by line identity when needed.
@@ -198,6 +256,12 @@ export function TakeoffDetailPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          <Link
+            className="rounded-full border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
+            to="/projects"
+          >
+            Home
+          </Link>
           <Link
             className="rounded-full border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
             to={`/takeoffs/${takeoffId}/versions`}
@@ -244,16 +308,17 @@ export function TakeoffDetailPage() {
 
       {detail.data ? (
         <>
-          <InfoCard
-            subtitle={detail.data.project.project_name}
-            title={`${detail.data.project.project_code} operational summary`}
-          >
-            <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-5">
+          <InfoCard subtitle="Business-facing metadata for the current takeoff" title="Operational summary">
+            <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
               <div className="rounded-2xl bg-slate-50 px-4 py-4">
                 <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Project</p>
                 <p className="mt-1 text-sm font-semibold text-slate-900">
                   {detail.data.project.project_name}
                 </p>
+              </div>
+              <div className="rounded-2xl bg-slate-50 px-4 py-4">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Structure</p>
+                <p className="mt-1 text-sm font-semibold text-slate-900">{structureLabel}</p>
               </div>
               <div className="rounded-2xl bg-slate-50 px-4 py-4">
                 <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Created</p>
@@ -267,37 +332,35 @@ export function TakeoffDetailPage() {
                   {formatDateTime(detail.data.updated_at)}
                 </p>
               </div>
-              <div className="rounded-2xl bg-slate-50 px-4 py-4">
-                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Line count</p>
-                <p className="mt-1 text-sm font-semibold text-slate-900">
-                  {detail.data.summary.line_count}
-                </p>
-              </div>
-              <div className="rounded-2xl bg-slate-50 px-4 py-4">
-                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Mode</p>
-                <p className="mt-1 text-sm font-semibold text-slate-900">
-                  {detail.data.state.is_locked ? 'Locked snapshot' : 'Mutable current'}
-                </p>
-              </div>
             </div>
           </InfoCard>
 
-          <section className="grid gap-4 md:grid-cols-3">
-            <InfoCard subtitle="Before tax" title="Subtotal">
-              <p className="text-3xl font-semibold tracking-tight text-slate-900">
-                ${detail.data.totals.subtotal}
+          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-3xl border border-slate-200 bg-white px-5 py-5 shadow-sm">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Ground Total</p>
+              <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">
+                {formatCurrency(detail.data.stage_totals.ground.subtotal)}
               </p>
-            </InfoCard>
-            <InfoCard subtitle="Tax summary" title="Tax">
-              <p className="text-3xl font-semibold tracking-tight text-slate-900">
-                ${detail.data.totals.tax}
+            </div>
+            <div className="rounded-3xl border border-slate-200 bg-white px-5 py-5 shadow-sm">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">TopOut Total</p>
+              <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">
+                {formatCurrency(detail.data.stage_totals.topout.subtotal)}
               </p>
-            </InfoCard>
-            <InfoCard subtitle="Operational total" title="Total">
-              <p className="text-3xl font-semibold tracking-tight text-slate-900">
-                ${detail.data.totals.total}
+            </div>
+            <div className="rounded-3xl border border-slate-200 bg-white px-5 py-5 shadow-sm">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Final Total</p>
+              <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">
+                {formatCurrency(detail.data.stage_totals.final.subtotal)}
               </p>
-            </InfoCard>
+            </div>
+            <div className="rounded-3xl bg-slate-950 px-5 py-5 text-white shadow-sm">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-300">Grand Total</p>
+              <p className="mt-2 text-3xl font-semibold tracking-tight">
+                {formatCurrency(detail.data.totals.total)}
+              </p>
+              <p className="mt-2 text-sm text-slate-300">Tax {formatCurrency(detail.data.totals.tax)}</p>
+            </div>
           </section>
 
           <ExportActions
@@ -314,61 +377,90 @@ export function TakeoffDetailPage() {
                 title={group.label}
               >
                 {group.items.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500">
-                    No lines in this stage.
+                  <div className="space-y-4">
+                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+                      No lines in this stage.
+                    </div>
+                    <div className="flex justify-end border-t border-slate-200 pt-4">
+                      <div className="rounded-2xl bg-slate-100 px-4 py-3 text-right">
+                        <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Stage Total</p>
+                        <p className="mt-1 text-lg font-semibold text-slate-900">
+                          {formatCurrency(detail.data.stage_totals[group.key].subtotal)}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">Before tax</p>
+                      </div>
+                    </div>
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full border-separate border-spacing-y-2">
-                      <thead>
-                        <tr className="text-left text-[11px] uppercase tracking-[0.18em] text-slate-400">
-                          <th className="px-3 py-2">Item</th>
-                          <th className="px-3 py-2">Description</th>
-                          <th className="px-3 py-2">Qty</th>
-                          <th className="px-3 py-2">Stage</th>
-                          <th className="px-3 py-2">Factor</th>
-                          <th className="px-3 py-2">Sort</th>
-                          {isEditor ? <th className="px-3 py-2 text-right">Actions</th> : null}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {group.items.map((line) => (
-                          <tr key={line.line_id} className="rounded-2xl bg-slate-50 text-sm text-slate-700">
-                            <td className="rounded-l-2xl px-3 py-3 font-semibold text-slate-900">
-                              {line.item_code}
-                            </td>
-                            <td className="px-3 py-3">{line.description}</td>
-                            <td className="px-3 py-3">{line.qty}</td>
-                            <td className="px-3 py-3 capitalize">{line.stage}</td>
-                            <td className="px-3 py-3">{line.factor}</td>
-                            <td className="px-3 py-3">{line.sort_order}</td>
-                            {isEditor ? (
-                              <td className="rounded-r-2xl px-3 py-3">
-                                <div className="flex justify-end gap-2">
-                                  <button
-                                    className="rounded-full border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-white"
-                                    onClick={() => openEditModal(line)}
-                                    type="button"
-                                  >
-                                    Edit
-                                  </button>
-                                  <button
-                                    className="rounded-full border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-50"
-                                    onClick={() => {
-                                      setMutationError(null)
-                                      setLinePendingDelete(line)
-                                    }}
-                                    type="button"
-                                  >
-                                    Delete
-                                  </button>
-                                </div>
-                              </td>
-                            ) : null}
+                  <div className="space-y-4">
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full border-separate border-spacing-y-2">
+                        <thead>
+                          <tr className="text-left text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                            <th className="px-3 py-2">Item</th>
+                            <th className="px-3 py-2">Description</th>
+                            <th className="px-3 py-2">Qty</th>
+                            <th className="px-3 py-2">Factor</th>
+                            <th className="px-3 py-2 text-right">Unit Price</th>
+                            <th className="px-3 py-2 text-right">Line Total</th>
+                            <th className="px-3 py-2 text-right">Actions</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {group.items.map((line) => (
+                            <tr key={line.line_id} className="rounded-2xl bg-slate-50 text-sm text-slate-700">
+                              <td className="rounded-l-2xl px-3 py-3 font-semibold text-slate-900">
+                                {line.item_code}
+                              </td>
+                              <td className="px-3 py-3">{line.description}</td>
+                              <td className="px-3 py-3">{formatQuantity(line.qty)}</td>
+                              <td className="px-3 py-3">{line.factor}</td>
+                              <td className="px-3 py-3 text-right font-medium text-slate-900">
+                                {formatCurrency(line.unit_price)}
+                              </td>
+                              <td className="px-3 py-3 text-right font-semibold text-slate-900">
+                                {formatCurrency(line.line_total)}
+                              </td>
+                              <td className="rounded-r-2xl px-3 py-3">
+                                {isEditor ? (
+                                  <div className="flex justify-end gap-2">
+                                    <button
+                                      className="rounded-full border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-white"
+                                      onClick={() => openEditModal(line)}
+                                      type="button"
+                                    >
+                                      Edit
+                                    </button>
+                                    <button
+                                      className="rounded-full border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-50"
+                                      onClick={() => {
+                                        setMutationError(null)
+                                        setLinePendingDelete(line)
+                                      }}
+                                      type="button"
+                                    >
+                                      Delete
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="text-right text-xs font-medium text-slate-400">View only</div>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="flex justify-end border-t border-slate-200 pt-4">
+                      <div className="rounded-2xl bg-slate-100 px-4 py-3 text-right">
+                        <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Stage Total</p>
+                        <p className="mt-1 text-lg font-semibold text-slate-900">
+                          {formatCurrency(detail.data.stage_totals[group.key].subtotal)}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">Before tax</p>
+                      </div>
+                    </div>
                   </div>
                 )}
               </InfoCard>

@@ -225,6 +225,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE projects ADD COLUMN valve_discount TEXT NOT NULL DEFAULT '0.00'"
         )
+    if not _has_column(conn, "projects", "is_archived"):
+        conn.execute(
+            "ALTER TABLE projects ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0"
+        )
 
     conn.execute(
         """
@@ -319,6 +323,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
             takeoff_id TEXT PRIMARY KEY,
             project_code TEXT NOT NULL,
             template_code TEXT NOT NULL,
+            model_display TEXT NULL,
             tax_rate TEXT NOT NULL,
             valve_discount TEXT NOT NULL DEFAULT '0.00',
             is_locked INTEGER NOT NULL DEFAULT 0,
@@ -334,6 +339,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE takeoffs ADD COLUMN valve_discount TEXT NOT NULL DEFAULT '0.00'"
         )
+    if not _has_column(conn, "takeoffs", "model_display"):
+        conn.execute("ALTER TABLE takeoffs ADD COLUMN model_display TEXT NULL")
     if not _has_column(conn, "takeoffs", "is_locked"):
         conn.execute(
             "ALTER TABLE takeoffs ADD COLUMN is_locked INTEGER NOT NULL DEFAULT 0"
